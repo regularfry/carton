@@ -70,7 +70,67 @@ class Carton
       
   end
 
+  class ExtSetup
+    def initialize(filename)
+      @filename=filename
+    end
 
+    def enable(*exts)
+      exts.each do |ext|
+        quoted_ext = ext.gsub(%r{/}, '\\/')
+        system "sed -i 's/^\##{quoted_ext}$/#{quoted_ext}/' #{@filename}"
+      end
+    end
+
+
+    def enabled
+      result = []
+      raise "#{@filename} doesn't exist!" unless File.file?(@filename)
+      File.open(@filename) do |f|
+        f.each_line do |line|
+          next if line =~ /\Aoption/
+          next if line.strip.length == 0
+          next if line =~ /\A#/
+
+          result << line.strip
+        end
+      end
+      result
+    end
+
+    def static!
+      enable("option nodynamic")
+    end
+
+  end
+
+  
+
+  class Exts
+    attr_reader :path
+
+    def initialize(path)
+      @path = path
+      @setup = ExtSetup.new(File.join(path, "Setup"))
+    end
+
+    def enable(*exts)
+      @setup.enable(*exts)
+      @setup.static!
+    end
+    
+    def enabled
+      return @setup.enabled().select do |line|
+        prefix = File.join( File.dirname(@path), line.strip, "lib" )
+        File.directory?( prefix )
+      end
+    end
+
+  end
+
+
+  # Here we assume that the user has already installed the ruby that they want to use.
+  # This means that the source *should* be available at ~/.rvm/src.
   class RVM
     def self.ruby_home
       home_line = `rvm info homes | grep 'ruby:'`
@@ -92,12 +152,18 @@ class Carton
       return File.join(ENV['rvm_path'], "usr", "lib", libname)
     end
 
+    def self.enable_exts(*exts)
+      exts.each do |ext|
+
+      end
+    end
+
     def self.install_package(package)
       system "rvm package install #{package}"
     end
 
-    def self.install_ruby
-      system "rvm install #{current} -static"
+    def self.rebuild_ruby
+      system "rvm install #{current} --static"
     end
 
     def self.stdlib
@@ -116,24 +182,11 @@ class Carton
     def self.ext_dir
       File.join(self.src, "ext")
     end
-
-    def self.ext_libs
-      fn_setup_file = File.join(self.ext_dir, "Setup")
-      result = []
-      raise "#{fn_setup_file} doesn't exist!" unless File.file?(fn_setup_file)
-      File.open(fn_setup_file) do |f|
-        f.each_line do |line|
-          next if line =~ /\Aoption/
-          next if line.strip.length == 0
-          next if line =~ /\A#/
-
-          prefix = File.join( self.ext_dir, line.strip, "lib" )
-          next unless File.directory?( prefix )
-          result << prefix
-        end
-      end
-      result
+    
+    def self.exts
+      Exts.new(self.ext_dir)
     end
+
 
     def self.rbconfig
       unless (@compile_params ||= false)
@@ -220,8 +273,8 @@ class Carton
     end
 
     def pack_exts(am_db)
-      fns_ext_libs = RVM.ext_libs
-      fns_ext_libs.each do |fn_lib|
+      exts = RVM.exts
+      exts.enabled.each do |fn_lib|
         am_db.merge(fn_lib, fn_lib)
       end
     end
@@ -251,10 +304,39 @@ class Carton
       end
     end
 
+
+    def amalgalite_objects
+      amalgalite = Gem.new("amalgalite")
+      amalgalite.install unless amalgalite.exists?
+      FileList[File.join(amalgalite.root, "ext", "amalgalite", "*.o")]
+    end
+
     def define(outputfile, appfile, include_files)
 
+      # These are the default extensions which crate builds, I'll sort
+      # out a different mechanism for specifying these later
+      allowed_exts = %w{
+          bigdecimal
+          digest
+          digest/md5
+          digest/sha1
+          enumerator
+          etc
+          fcntl
+          io/wait
+          nkf
+          openssl
+          socket
+          stringio
+          strscan
+          syck
+          thread
+          zlib
+        }
+
       file fn_rvm_libruby_static do |t|
-        RVM.install_ruby()
+        RVM.exts.enable(*allowed_exts)
+        RVM.rebuild_ruby()
         t.check!
       end
 
@@ -264,11 +346,11 @@ class Carton
         t.check!
       end
       
-      # The install_package task here can't rationally
-      # be shared because adding a basic task as a prerequisite
-      # to both triggers a rebuild every invocation. This is
-      # because basic tasks have a timestamp of Time.now,
-      # which will be after the timestamps of the file tasks.
+      # The install_package task here can't rationally be shared
+      # because adding a basic task as a prerequisite to both triggers
+      # a rebuild every invocation. This is because basic tasks have a
+      # timestamp of Time.now, which will be after the timestamps of
+      # the file tasks.
       file RVM.lib("libcrypto.a") do |t|
         RVM.install_package("openssl")
         t.check!
@@ -281,13 +363,8 @@ class Carton
 
 
 
-      file fn_build_file("libamalgalite3.a") do |t|
-        amalgalite = Gem.new("amalgalite")
-        amalgalite.install unless amalgalite.exists?
-
-        files= FileList[File.join(amalgalite.root, "ext", "amalgalite", "*.o")]
-
-        sh "ar rcs #{t.name} #{files.join(" ")}"
+      file fn_build_file("libamalgalite3.a") => amalgalite_objects do |t|
+        sh "ar rcs #{t.name} #{amalgalite_objects.join(" ")}"
         t.check!
       end
 
@@ -382,6 +459,7 @@ class Carton
         sh "gcc -static #{objs.map{|o| fn_build_file(o)}.join(" ")} -L#{@build_dir} #{lib_opts} #{ruby_link_opts} -o #{t.name}"
 
         t.check!
+        puts "#{t.name} built."
       end
       
       self
