@@ -1,0 +1,440 @@
+#!/usr/bin/env ruby
+# encoding: utf-8
+
+# Usage:
+#   $ carton build outputfile appfile [glob]+
+#       Package the files in @glob@, plus any gems
+#       listed in the @Gemfile@, into the static
+#       executable named @outputfile@. The ruby
+#       used will be the current rvm ruby. Running
+#       the executable will be equivalent to running
+#       @appfile@.
+# 
+
+# We actually need this as a library
+require 'rubygems'
+# This gives us a Rake application
+require 'rake'
+# We define a custom task type here
+require 'rake/tasklib'
+
+$cc = ENV['CC']
+if $cc.nil? || $cc.empty?
+  $cc = 'gcc'
+end
+
+$bfdarch = "i386"
+$bfdtarget="elf64-x86-64"
+# $bdftarget="elf32-i386"
+
+
+class Rake::FileTask
+  def check!
+    raise "Creating #{self.name} failed!" unless
+      File.exists?(self.name)
+  end
+end
+
+class Carton
+
+  class Gem
+    attr_reader :name
+
+    def initialize(name)
+      @name = name
+    end
+
+    def gem_spec
+      raise "Gem #{name} not found!" unless
+        @gem_spec ||= ::Gem.source_index.find_name(name).first
+      @gem_spec
+    end
+    
+    def exists?
+      gem_spec() && true rescue nil
+    end
+
+    def root
+      File.join(gem_spec().full_gem_path)
+    end
+
+    def self.install(name)
+      system "gem install #{name} --no-rdoc --no-ri"
+    end
+
+      
+  end
+
+
+  class RVM
+    def self.ruby_home
+      home_line = `rvm info homes | grep 'ruby:'`
+      if home_line =~ /ruby:\s+"(.*)"/
+        return $1.strip
+      else
+        return nil
+      end
+    end
+
+    def self.current
+      current_line = `rvm current`.strip
+      unless current_line.nil? || current_line.empty?
+        return current_line
+      end
+    end
+    
+    def self.lib(libname)
+      return File.join(ENV['rvm_path'], "usr", "lib", libname)
+    end
+
+    def self.install_package(package)
+      system "rvm package install #{package}"
+    end
+
+    def self.install_ruby
+      system "rvm install #{current} -static"
+    end
+
+    def self.stdlib
+      File.join(self.ruby_home, "lib", "ruby", "1.8")
+    end
+    
+    def self.src
+      File.join(ENV['rvm_path'], "src", self.current)
+    end
+
+    def self.fn_rbconfig
+      # Don't know if this is correct, let's see if it works
+      File.join(self.src, "rbconfig.rb")
+    end
+ 
+    def self.ext_dir
+      File.join(self.src, "ext")
+    end
+
+    def self.ext_libs
+      fn_setup_file = File.join(self.ext_dir, "Setup")
+      result = []
+      raise "#{fn_setup_file} doesn't exist!" unless File.file?(fn_setup_file)
+      File.open(fn_setup_file) do |f|
+        f.each_line do |line|
+          next if line =~ /\Aoption/
+          next if line.strip.length == 0
+          next if line =~ /\A#/
+
+          prefix = File.join( self.ext_dir, line.strip, "lib" )
+          next unless File.directory?( prefix )
+          result << prefix
+        end
+      end
+      result
+    end
+
+    def self.rbconfig
+      unless @compile_params
+        @compile_params = {}
+        %w[ CC CFLAGS XCFLAGS LDFLAGS CPPFLAGS LIBS ].each do |p|
+          @compile_params[p] = %x( ruby -rrbconfig -e 'puts Config::CONFIG["#{p}"] || ""' ).strip
+        end
+      end
+      return @compile_params
+
+    end
+
+  end
+
+
+  class Amalgalite
+    def initialize(fn_db)
+      @fn_db = fn_db
+    end
+  
+    def bin
+      "amalgalite-pack"
+    end
+
+    def pack(opts)
+      sh "#{bin} #{opts}"
+    end
+    
+    def sh(cmd)
+      raise unless system cmd
+    end
+  
+    def add(prefix, files)
+      merged_files = [*files].join(" ")
+      pack "--db #{@fn_db} --compress --strip-prefix #{prefix} #{merged_files}"
+    end
+    
+    def merge(prefix, files)
+      pack "--merge --db #{@fn_db} --compress --strip-prefix #{prefix} #{[*files].join(" ")}"
+    end
+
+    def add_self
+      pack "--drop-table --db #{@fn_db} --self"
+    end
+  end
+
+  class Task < Rake::TaskLib
+    def initialize(outputfile, appfile, include_files)
+      @build_dir = 'build'
+      define(outputfile, appfile, include_files)
+    end
+
+
+    def fn_rvm_libruby_static
+      if ruby_home = RVM.ruby_home 
+        return File.join(ruby_home, "lib", "libruby-static.a")
+      else
+        raise "No ruby home found by `rvm info homes`."
+      end
+    end
+
+    def fn_rvm_zlib_static
+      return RVM.lib("libz.a")
+    end
+
+    def fn_rvm_openssl_static
+      return RVM.lib("libcrypto.a")
+    end
+
+    def fn_rvm_amalgalite_static
+      amalgalite = Gem.new("amalgalite")
+      return File.join(amalgalite.root, "ext", "amalgalite", "amalgalite3.so")
+    end
+
+
+    # The path into the build directory for the given filename
+    def fn_build_file(*filenames)
+      directory @build_dir
+      result = File.join(@build_dir, *filenames)
+      file result => @build_dir
+      return result
+    end
+
+    def pack_ruby(am_db)
+      fn_prefix = RVM.stdlib
+      am_db.add(fn_prefix, fn_prefix)
+    end
+
+    def pack_rbconfig(am_db)
+      fn_rbconfig = RVM.fn_rbconfig
+      am_db.add(File.dirname(fn_rbconfig), fn_rbconfig)
+    end
+
+    def pack_exts(am_db)
+      fns_ext_libs = RVM.ext_libs
+      fns_ext_libs.each do |fn_lib|
+        am_db.merge(fn_lib, fn_lib)
+      end
+    end
+
+    def pack_amalgalite(am_db)
+      am_db.add_self
+    end
+
+    def pack_app_files(am_db, glob)
+      prefix =Dir.pwd
+      expanded_glob = File.expand_path(glob)
+      am_db.add(prefix, expanded_glob)
+    end
+
+    def with_tempfile(orig_name)
+      tmpname = orig_name + ".tmp"
+      rm_f tmpname
+      yield tmpname
+      FileUtils.mv tmpname, orig_name
+    end
+
+
+
+    def define(outputfile, appfile, include_files)
+
+      file fn_rvm_libruby_static do |t|
+        RVM.install_ruby()
+        t.check!
+      end
+
+
+      file RVM.lib("libz.a") do |t|
+        RVM.install_package("zlib")
+        t.check!
+      end
+      
+      # The install_package task here can't rationally
+      # be shared because adding a basic task as a prerequisite
+      # to both triggers a rebuild every invocation. This is
+      # because basic tasks have a timestamp of Time.now,
+      # which will be after the timestamps of the file tasks.
+      file RVM.lib("libcrypto.a") do |t|
+        RVM.install_package("openssl")
+        t.check!
+      end
+
+      file RVM.lib("libssl.a") do |t|
+        RVM.install_package("openssl")
+        t.check!
+      end
+
+
+
+      file fn_rvm_amalgalite_static do |t|
+        Gem.install("amalgalite")
+        t.check!
+      end
+
+
+      file(fn_build_file("libruby-static.a") => fn_rvm_libruby_static) do |t|
+        sh "cp #{fn_rvm_libruby_static} #{t.name}"
+        t.check!
+      end
+
+
+      file(fn_build_file("libz.a") => [RVM.lib("libz.a")]) do |t|
+        sh "cp #{fn_rvm_zlib_static} #{t.name}"
+        t.check!
+      end
+
+      file(fn_build_file("libssl.a") => [RVM.lib("libssl.a")]) do |t|
+        sh "cp #{RVM.lib("libssl.a")} #{t.name}"
+        t.check!
+      end
+
+      file(fn_build_file("libcrypto.a") => [RVM.lib("libcrypto.a")]) do |t|
+        sh "cp #{RVM.lib("libcrypto.a")} #{t.name}"
+        t.check!
+      end
+
+
+
+      file fn_build_file("lib.db") do |t|
+        with_tempfile(t.name) do |tmpname|
+
+          am_lib = Amalgalite.new(tmpname)
+          pack_ruby(am_lib)
+          pack_rbconfig(am_lib)
+          pack_exts(am_lib)
+          pack_amalgalite(am_lib)
+
+        end
+
+        t.check!
+      end
+
+      file fn_build_file("app.db") do |t|
+        with_tempfile(t.name) do |tmpname|
+          am_lib = Amalgalite.new(tmpname)
+          
+          include_files.each do |glob|
+            pack_app_files(am_lib, glob)
+          end
+          pack_app_files(am_lib, appfile)
+
+        end
+        t.check!
+      end
+
+
+      fns_code_obj = [sqldump_obj( fn_build_file("lib.db") ),
+                      sqldump_obj( fn_build_file("app.db") )]
+
+      file fn_build_file("librubycode.a") => fns_code_obj do |t|
+        sh "ar rcs #{t.name} #{fns_code_obj.join(" ")}"
+        t.check!
+      end
+
+      def fn_carton_boot_c
+        dirname = File.join(File.dirname(__FILE__),'..')
+        return File.expand_path(File.join(dirname, "lib", "carton_boot.c"))
+      end
+
+      file fn_build_file("carton_boot.o") => fn_carton_boot_c() do |t|
+        opts = %W{-D'CARTON_ENTRY="#{appfile}"'
+                  -c #{fn_carton_boot_c()}
+                  #{RVM.rbconfig['CFLAGS']}
+                  #{RVM.rbconfig['XCFLAGS']}
+                  #{RVM.rbconfig['CPPFLAGS']}
+                  -I #{RVM.src}
+                  -o #{t.name}
+        }
+        sh "#{RVM.rbconfig['CC']} #{opts.join(" ")}"
+        t.check!
+      end
+      
+      libs = %w{ssl
+                crypto
+                z
+                ruby-static
+                rubycode}
+
+      obj_files = (libs.map{|l| "lib#{l}.a"}+%w{carton_boot.o}).
+        map{|f| fn_build_file(f)}
+
+      desc "Build the static objects"
+      task :obj_files => obj_files
+
+      desc "Build the executable"
+      task outputfile => :obj_files do |t|
+        lib_opts = libs.map{|l| "-l"+l}.join(" ")
+        sh "gcc -static #{fn_build_file("carton_boot.o")} -L#{@build_dir} #{lib_opts} -o #{t.name}"
+
+        t.check!
+      end
+      
+      self
+    end
+
+
+    def sqldump_obj(fn_db)
+      name = File.basename(fn_db, ".db")
+      fn_sql = fn_build_file("#{name}.sql")
+      fn_obj = fn_build_file("#{name}.o")
+
+      file fn_sql => fn_db do |t|
+        sh "sqlite3 #{fn_db} '.dump' > #{fn_sql}"
+        t.check!
+      end
+
+      file fn_obj => fn_sql do |t|
+        target = File.expand_path(t.name)
+        Dir.chdir(File.dirname(fn_sql)) do
+          sh "objcopy -Ibinary -O  #{$bfdtarget} -B #{$bfdarch} #{File.basename(fn_sql)} #{target}"
+        end
+        t.check!
+      end
+    end
+
+  end
+
+  def initialize
+    @app = Rake.application
+    @app.init("carton")
+  end
+
+  def run(outputfile, appfile, include_files)
+    # HACKHACKHACK
+    Task.new(outputfile, appfile, include_files)
+    if outputfile && appfile && include_files
+      @app.invoke_task(outputfile)
+    else
+      help()
+    end
+  end
+
+  def help
+    @app.display_tasks_and_comments
+  end
+end
+
+def usage
+  $stderr.puts "Usage: #{$0} <outputfile> <appfile> [<includefile>*]"
+end
+
+if __FILE__==$0
+  outputfile, appfile, *globs = ARGV
+  unless outputfile && appfile
+    usage()
+    exit
+  end
+  Carton.new.run(outputfile, appfile, globs)
+end
