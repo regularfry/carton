@@ -46,7 +46,7 @@ class Carton
 
     def gem_spec
       raise "Gem #{name} not found!" unless
-        @gem_spec ||= ::Gem.source_index.find_name(name).first
+        @gem_spec ||= ::Gem.source_index.find_name(name).last
       @gem_spec
     end
     
@@ -58,8 +58,13 @@ class Carton
       File.join(gem_spec().full_gem_path)
     end
 
+    def install
+      self.class.install(self.name)
+    end
+
     def self.install(name)
       system "gem install #{name} --no-rdoc --no-ri"
+      return new(name)
     end
 
       
@@ -131,7 +136,7 @@ class Carton
     end
 
     def self.rbconfig
-      unless @compile_params
+      unless (@compile_params ||= false)
         @compile_params = {}
         %w[ CC CFLAGS XCFLAGS LDFLAGS CPPFLAGS LIBS ].each do |p|
           @compile_params[p] = %x( ruby -rrbconfig -e 'puts Config::CONFIG["#{p}"] || ""' ).strip
@@ -175,12 +180,12 @@ class Carton
     end
   end
 
+
   class Task < Rake::TaskLib
     def initialize(outputfile, appfile, include_files)
       @build_dir = 'build'
       define(outputfile, appfile, include_files)
     end
-
 
     def fn_rvm_libruby_static
       if ruby_home = RVM.ruby_home 
@@ -190,17 +195,9 @@ class Carton
       end
     end
 
-    def fn_rvm_zlib_static
-      return RVM.lib("libz.a")
-    end
-
-    def fn_rvm_openssl_static
-      return RVM.lib("libcrypto.a")
-    end
-
     def fn_rvm_amalgalite_static
       amalgalite = Gem.new("amalgalite")
-      return File.join(amalgalite.root, "ext", "amalgalite", "amalgalite3.so")
+      return File.join(amalgalite.root, "ext", "amalgalite", "amalgalite3.o")
     end
 
 
@@ -247,6 +244,12 @@ class Carton
     end
 
 
+    def file_copy(from, to)
+      file to => from do |t|
+        sh "cp #{from} #{to}"
+        t.check!
+      end
+    end
 
     def define(outputfile, appfile, include_files)
 
@@ -278,33 +281,26 @@ class Carton
 
 
 
-      file fn_rvm_amalgalite_static do |t|
-        Gem.install("amalgalite")
+      file fn_build_file("libamalgalite3.a") do |t|
+        amalgalite = Gem.new("amalgalite")
+        amalgalite.install unless amalgalite.exists?
+
+        files= FileList[File.join(amalgalite.root, "ext", "amalgalite", "*.o")]
+
+        sh "ar rcs #{t.name} #{files.join(" ")}"
         t.check!
       end
 
 
-      file(fn_build_file("libruby-static.a") => fn_rvm_libruby_static) do |t|
-        sh "cp #{fn_rvm_libruby_static} #{t.name}"
-        t.check!
+      {
+        "libz.a"           => RVM.lib("libz.a"),
+        "libssl.a"         => RVM.lib("libssl.a"),
+        "libcrypto.a"      => RVM.lib("libcrypto.a"),
+        "libruby-static.a" => fn_rvm_libruby_static
+      }.
+        each_pair do |to, from|
+        file_copy(from, fn_build_file(to))
       end
-
-
-      file(fn_build_file("libz.a") => [RVM.lib("libz.a")]) do |t|
-        sh "cp #{fn_rvm_zlib_static} #{t.name}"
-        t.check!
-      end
-
-      file(fn_build_file("libssl.a") => [RVM.lib("libssl.a")]) do |t|
-        sh "cp #{RVM.lib("libssl.a")} #{t.name}"
-        t.check!
-      end
-
-      file(fn_build_file("libcrypto.a") => [RVM.lib("libcrypto.a")]) do |t|
-        sh "cp #{RVM.lib("libcrypto.a")} #{t.name}"
-        t.check!
-      end
-
 
 
       file fn_build_file("lib.db") do |t|
@@ -365,18 +361,25 @@ class Carton
                 crypto
                 z
                 ruby-static
-                rubycode}
+                rubycode
+                amalgalite3
+      }
+      objs = %w{
+                carton_boot
+      }.map{|o| o+".o"}
 
-      obj_files = (libs.map{|l| "lib#{l}.a"}+%w{carton_boot.o}).
+      obj_files = (libs.map{|l| "lib#{l}.a"}+objs).
         map{|f| fn_build_file(f)}
+
 
       desc "Build the static objects"
       task :obj_files => obj_files
 
       desc "Build the executable"
-      task outputfile => :obj_files do |t|
+      file outputfile => :obj_files do |t|
         lib_opts = libs.map{|l| "-l"+l}.join(" ")
-        sh "gcc -static #{fn_build_file("carton_boot.o")} -L#{@build_dir} #{lib_opts} -o #{t.name}"
+        ruby_link_opts = RVM.rbconfig['LIBS']
+        sh "gcc -static #{objs.map{|o| fn_build_file(o)}.join(" ")} -L#{@build_dir} #{lib_opts} #{ruby_link_opts} -o #{t.name}"
 
         t.check!
       end
