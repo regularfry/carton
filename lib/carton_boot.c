@@ -176,6 +176,12 @@ void bootstrap()
   am_bootstrap_lift_str( cARB, rb_ary_new3(1, sql_str) );
 }
 
+VALUE carton_init_exts(VALUE _)
+{
+  Init_amalgalite3();  
+  Init_ext();
+  return Qnil;
+}
 
 int main( int argc, char** argv ) 
 {
@@ -200,22 +206,20 @@ int main( int argc, char** argv )
   /* make ARGV available */
   ruby_set_argv( argc, argv );
   
-  /* Initialize amalgalite. This must be done before other extensions.
-   */
+  rb_protect( carton_init_exts, Qnil, &state );
 
-  Init_amalgalite3();
+  if ( 0 == state ) {
 
-  /* initialize all extensions */
-  Init_ext();
+    /* load up the amalgalite libs */
+    bootstrap();
 
-  /* load up the amalgalite libs */
-  bootstrap();
+    /* remove the current LOAD_PATH */
+    rb_ary_clear( rb_gv_get( "$LOAD_PATH" ) );
 
-  /* remove the current LOAD_PATH */
-  rb_ary_clear( rb_gv_get( "$LOAD_PATH" ) );
+    /* invoke the class / method passing in ARGV and ENV */
+    rb_protect( carton_wrap_app, Qnil, &state );
 
-  /* invoke the class / method passing in ARGV and ENV */
-  rb_protect( carton_wrap_app, Qnil, &state );
+  }
 
   /* check the results */
   if ( state ) {
@@ -245,9 +249,6 @@ int main( int argc, char** argv )
     }
   } 
 
-  free( ca.file_name );
-  free( ca.class_name );
-  free( ca.method_name );
 
   /* shut down ruby */
   ruby_finalize();

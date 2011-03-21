@@ -24,8 +24,8 @@ if $cc.nil? || $cc.empty?
 end
 
 $bfdarch = "i386"
-# $bfdtarget="elf64-x86-64"
-$bfdtarget="elf32-i386"
+$bfdtarget="elf64-x86-64"
+# $bfdtarget="elf32-i386"
 
 
 class Rake::FileTask
@@ -126,6 +126,10 @@ class Carton
       end
     end
 
+    def libs
+      FileList[File.join(@path, "**", "*.a")]
+    end
+
   end
 
 
@@ -207,6 +211,45 @@ class Carton
 
   end
 
+  class Ruby
+    attr_reader :root
+    def initialize(root)
+      @root = root
+    end
+
+    def fn(*args)
+      File.expand_path(File.join(@root, *args))
+    end
+
+    def fn_stdlib
+      fn("lib")
+    end
+
+    def fn_ext
+      fn("ext")
+    end
+    
+    def exts
+      Exts.new(fn_ext)
+    end
+
+    
+    def rbconfig
+      unless (@compile_params ||= false)
+        @compile_params = {}
+        %w[ CC CFLAGS XCFLAGS LDFLAGS CPPFLAGS LIBS ].each do |p|
+          @compile_params[p] = %x( ruby -r#{fn("rbconfig")} -e 'puts Config::CONFIG["#{p}"] || ""' ).strip
+        end
+      end
+      return @compile_params
+    end
+
+
+    def make
+      Dir.chdir(@root){ raise "Make failed" unless system "make" }
+    end
+  end
+
 
   class Amalgalite
     def initialize(fn_db)
@@ -241,18 +284,12 @@ class Carton
 
 
   class Task < Rake::TaskLib
-    def initialize(outputfile, appfile, include_files)
-      @build_dir = 'build'
+    def initialize(build_path, outputfile, appfile, include_files)
+      @build_dir = build_path
+      @ruby = Ruby.new(fn_build_file("ruby"))
       define(outputfile, appfile, include_files)
     end
 
-    def fn_rvm_libruby_static
-      if ruby_home = RVM.ruby_home 
-        return File.join(ruby_home, "lib", "libruby-static.a")
-      else
-        raise "No ruby home found by `rvm info homes`."
-      end
-    end
 
     def fn_rvm_amalgalite_static
       amalgalite = Gem.new("amalgalite")
@@ -268,18 +305,24 @@ class Carton
       return result
     end
 
+
     def pack_ruby(am_db)
-      fn_prefix = RVM.stdlib
+      fn_prefix = @ruby.fn_stdlib
       am_db.add(fn_prefix, fn_prefix)
     end
 
+
     def pack_rbconfig(am_db)
-      fn_rbconfig = RVM.fn_rbconfig
+      fn_rbconfig = @ruby.fn("rbconfig")
       am_db.add(File.dirname(fn_rbconfig), fn_rbconfig)
     end
 
+
+    def exts
+      @exts ||= @ruby.exts
+    end
+
     def pack_exts(am_db)
-      exts = RVM.exts
       exts.enabled.each do |fn_lib|
         am_db.merge(fn_lib, fn_lib)
       end
@@ -317,6 +360,13 @@ class Carton
       FileList[File.join(amalgalite.root, "ext", "amalgalite", "*.o")]
     end
 
+
+    def fn_carton_boot_c
+      dirname = File.join(File.dirname(__FILE__),'..')
+      return File.expand_path(File.join(dirname, "lib", "carton_boot.c"))
+    end
+
+
     def define(outputfile, appfile, include_files)
 
       # These are the default extensions which crate builds, I'll sort
@@ -338,27 +388,27 @@ class Carton
           thread
           zlib
         }
-          #openssl
+#          openssl # because I can't get this working yet
 
-      file fn_build_file("ruby") do |t|
+      desc "Copy RVM's cache of the ruby source into our build directory"
+      # This is needed otherwise we risk clobbering the *current* ruby,
+      # which would be Bad.
+      file @ruby.root do |t|
         sh "cp -a #{RVM.src} #{t.name}"
-        rm_f fn_build_file("ruby", "libruby-static.a")
+        # Clear this out because chances are that our build
+        # choices won't match RVM's, and it might not get 
+        # rebuilt unless it's absent
+        rm_f @ruby.fn("libruby-static.a")
+
         t.check!
       end
-      
+   
 
-      # We need to copy the ruby source sideways and build it
-      # manually, otherwise we risk clobbering the *current* ruby,
-      # which would be Bad.
-      file( fn_build_file("ruby", "libruby-static.a") => 
-            fn_build_file("ruby") ) do |t|
+      file( @ruby.fn("libruby-static.a") => 
+            @ruby.root ) do |t|
 
-        puts "#{t.name} doesn't exist, and File.exists? returns "+ File.exists?(t.name).to_s
-
-        exts = Exts.new( fn_build_file("ruby","ext") )
-        exts.enable(*allowed_exts)
-
-        Dir.chdir(fn_build_file("ruby")){ sh "make" }
+        @ruby.exts.enable(*allowed_exts)
+        @ruby.make
         
         t.check!
       end
@@ -396,19 +446,13 @@ class Carton
         "libz.a"           => RVM.lib("libz.a"),
         "libssl.a"         => RVM.lib("libssl.a"),
         "libcrypto.a"      => RVM.lib("libcrypto.a"),
-        "libruby-static.a" => fn_build_file("ruby", 
-                                            "libruby-static.a"),
-        "extinit.o"        => fn_build_file("ruby","ext","extinit.o")
+        "libruby-static.a" => @ruby.fn("libruby-static.a"),
+        "extinit.o"        => @ruby.fn("ext","extinit.o")
       }.
         each_pair do |to, from|
         file_copy(from, fn_build_file(to))
       end
 
-      fns_exts = FileList[fn_build_file("ruby", "ext", "**", "*.a")]
-
-      fns_exts.each do |fn_ext|
-        file fn_ext => fn_build_file("ruby")
-      end
 
 
       file fn_build_file("lib.db") do |t|
@@ -425,7 +469,10 @@ class Carton
         t.check!
       end
 
-      file fn_build_file("app.db") do |t|
+
+      file appfile
+
+      file fn_build_file("app.db") => appfile do |t|
         with_tempfile(t.name) do |tmpname|
           am_lib = Amalgalite.new(tmpname)
           
@@ -442,26 +489,25 @@ class Carton
       fns_code_obj = [sqldump_obj( fn_build_file("lib.db") ),
                       sqldump_obj( fn_build_file("app.db") )]
 
+
       file fn_build_file("librubycode.a") => fns_code_obj do |t|
         sh "ar rcs #{t.name} #{fns_code_obj.join(" ")}"
         t.check!
       end
 
-      def fn_carton_boot_c
-        dirname = File.join(File.dirname(__FILE__),'..')
-        return File.expand_path(File.join(dirname, "lib", "carton_boot.c"))
-      end
+
+
 
       file fn_build_file("carton_boot.o") => fn_carton_boot_c() do |t|
         opts = %W{-D'CARTON_ENTRY="#{appfile}"'
                   -c #{fn_carton_boot_c()}
-                  #{RVM.rbconfig['CFLAGS']}
-                  #{RVM.rbconfig['XCFLAGS']}
-                  #{RVM.rbconfig['CPPFLAGS']}
-                  -I #{RVM.src}
+                  #{@ruby.rbconfig['CFLAGS']}
+                  #{@ruby.rbconfig['XCFLAGS']}
+                  #{@ruby.rbconfig['CPPFLAGS']}
+                  -I #{@ruby.root}
                   -o #{t.name}
         }
-        sh "#{RVM.rbconfig['CC']} #{opts.join(" ")}"
+        sh "#{@ruby.rbconfig['CC']} #{opts.join(" ")}"
         t.check!
       end
       
@@ -483,11 +529,24 @@ class Carton
       desc "Build the static objects"
       task :obj_files => obj_files + [fn_build_file("extinit.o")]
 
+      directory File.dirname(outputfile)
+
       desc "Build the executable"
-      file outputfile => :obj_files do |t|
+      file outputfile => [:obj_files, File.dirname(outputfile)] do |t|
+        # These should be another task, but since we can't know ahead of time what .a files 
+        # the ruby build is actually going to produce, we can't build it.
+        fns_exts = @ruby.exts.libs
+          
         lib_opts = libs.map{|l| "-l"+l}.join(" ")
-        ruby_link_opts = RVM.rbconfig['LIBS']
-        sh "gcc -static #{fn_build_file("extinit.o")} #{fns_exts.join(" ")} #{objs.map{|o| fn_build_file(o)}.join(" ")} -L#{@build_dir} #{lib_opts}  #{ruby_link_opts} -o #{t.name}"
+        ruby_link_opts = @ruby.rbconfig['LIBS']
+        sh %W{gcc -static 
+              #{fn_build_file("extinit.o")} 
+              #{fns_exts.join(" ")} 
+              #{objs.map{|o| fn_build_file(o)}.join(" ")}
+              -L#{@build_dir}
+              #{lib_opts}
+              #{ruby_link_opts}
+              -o #{t.name}}.join(" ")
 
         t.check!
         puts "#{t.name} built."
@@ -523,10 +582,10 @@ class Carton
     @app.init("carton")
   end
 
-  def run(outputfile, appfile, include_files)
+  def run(build_path, outputfile, appfile, include_files)
     # HACKHACKHACK
-    Task.new(outputfile, appfile, include_files)
-    if outputfile && appfile && include_files
+    if build_path && outputfile && appfile && include_files
+      Task.new(build_path, outputfile, appfile, include_files)
       @app.invoke_task(outputfile)
     else
       help()
@@ -539,14 +598,14 @@ class Carton
 end
 
 def usage
-  $stderr.puts "Usage: #{$0} <outputfile> <appfile> [<includefile>*]"
+  $stderr.puts "Usage: #{$0} <build_path> <outputfile> <appfile> [<includefile>*]"
 end
 
 if __FILE__==$0
-  outputfile, appfile, *globs = ARGV
-  unless outputfile && appfile
+  build_path, outputfile, appfile, *globs = ARGV
+  unless build_path && outputfile && appfile
     usage()
     exit
   end
-  Carton.new.run(outputfile, appfile, globs)
+  Carton.new.run(build_path, outputfile, appfile, globs)
 end
