@@ -24,8 +24,8 @@ if $cc.nil? || $cc.empty?
 end
 
 $bfdarch = "i386"
-$bfdtarget="elf64-x86-64"
-# $bdftarget="elf32-i386"
+# $bfdtarget="elf64-x86-64"
+$bfdtarget="elf32-i386"
 
 
 class Rake::FileTask
@@ -129,11 +129,16 @@ class Carton
   end
 
 
-  # Here we assume that the user has already installed the ruby that they want to use.
-  # This means that the source *should* be available at ~/.rvm/src.
+  # Here we assume that the user has already installed the ruby that
+  # they want to use.  This means that the source *should* be
+  # available at ~/.rvm/src.
   class RVM
+    def self.rvm
+      File.join(ENV['rvm_path'], "bin", "rvm")
+    end
+
     def self.ruby_home
-      home_line = `rvm info homes | grep 'ruby:'`
+      home_line = `#{rvm} info homes | grep 'ruby:'`
       if home_line =~ /ruby:\s+"(.*)"/
         return $1.strip
       else
@@ -141,8 +146,9 @@ class Carton
       end
     end
 
+
     def self.current
-      current_line = `rvm current`.strip
+      current_line = `#{rvm} current`.strip
       unless current_line.nil? || current_line.empty?
         return current_line
       end
@@ -159,11 +165,11 @@ class Carton
     end
 
     def self.install_package(package)
-      system "rvm package install #{package}"
+      system "#{rvm} package install #{package}"
     end
 
     def self.rebuild_ruby
-      system "rvm install #{current} --static"
+      system "#{rvm} install #{current} --static"
     end
 
     def self.stdlib
@@ -325,7 +331,6 @@ class Carton
           fcntl
           io/wait
           nkf
-          openssl
           socket
           stringio
           strscan
@@ -333,10 +338,28 @@ class Carton
           thread
           zlib
         }
+          #openssl
 
-      file fn_rvm_libruby_static do |t|
-        RVM.exts.enable(*allowed_exts)
-        RVM.rebuild_ruby()
+      file fn_build_file("ruby") do |t|
+        sh "cp -a #{RVM.src} #{t.name}"
+        rm_f fn_build_file("ruby", "libruby-static.a")
+        t.check!
+      end
+      
+
+      # We need to copy the ruby source sideways and build it
+      # manually, otherwise we risk clobbering the *current* ruby,
+      # which would be Bad.
+      file( fn_build_file("ruby", "libruby-static.a") => 
+            fn_build_file("ruby") ) do |t|
+
+        puts "#{t.name} doesn't exist, and File.exists? returns "+ File.exists?(t.name).to_s
+
+        exts = Exts.new( fn_build_file("ruby","ext") )
+        exts.enable(*allowed_exts)
+
+        Dir.chdir(fn_build_file("ruby")){ sh "make" }
+        
         t.check!
       end
 
@@ -373,10 +396,18 @@ class Carton
         "libz.a"           => RVM.lib("libz.a"),
         "libssl.a"         => RVM.lib("libssl.a"),
         "libcrypto.a"      => RVM.lib("libcrypto.a"),
-        "libruby-static.a" => fn_rvm_libruby_static
+        "libruby-static.a" => fn_build_file("ruby", 
+                                            "libruby-static.a"),
+        "extinit.o"        => fn_build_file("ruby","ext","extinit.o")
       }.
         each_pair do |to, from|
         file_copy(from, fn_build_file(to))
+      end
+
+      fns_exts = FileList[fn_build_file("ruby", "ext", "**", "*.a")]
+
+      fns_exts.each do |fn_ext|
+        file fn_ext => fn_build_file("ruby")
       end
 
 
@@ -450,13 +481,13 @@ class Carton
 
 
       desc "Build the static objects"
-      task :obj_files => obj_files
+      task :obj_files => obj_files + [fn_build_file("extinit.o")]
 
       desc "Build the executable"
       file outputfile => :obj_files do |t|
         lib_opts = libs.map{|l| "-l"+l}.join(" ")
         ruby_link_opts = RVM.rbconfig['LIBS']
-        sh "gcc -static #{objs.map{|o| fn_build_file(o)}.join(" ")} -L#{@build_dir} #{lib_opts} #{ruby_link_opts} -o #{t.name}"
+        sh "gcc -static #{fn_build_file("extinit.o")} #{fns_exts.join(" ")} #{objs.map{|o| fn_build_file(o)}.join(" ")} -L#{@build_dir} #{lib_opts}  #{ruby_link_opts} -o #{t.name}"
 
         t.check!
         puts "#{t.name} built."

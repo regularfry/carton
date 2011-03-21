@@ -39,65 +39,6 @@
  * application to the file:A.foo pattern
  */
 
-struct carton_app {
-  char  *file_name;
-  char  *class_name;
-  VALUE  app_instance;
-  char  *method_name;
-  ID     run_method;
-} ;
-
-typedef struct carton_app carton_app; 
-
-/* carton 'secret' options */
-static struct option longopts[] = {
-  { "carton-file",   required_argument, NULL, 1 },
-  { "carton-class",  required_argument, NULL, 2 },
-  { "carton-method", required_argument, NULL, 3 },
-  { NULL,           0,                 NULL, 0 }
-};
-
-int carton_init_from_options(carton_app *ca, int argc, char** argv )
-{
-  int ch ;
-  int done = 0;
-  int old_opterr = opterr;
-
-  /* turn off printing to stderr */
-  opterr = 0;
-
-  while ( !done && (ch = getopt_long( argc, argv, "", longopts, NULL ) ) != -1 ) {
-    switch ( ch ) {
-    case 1:
-      free( ca->file_name );
-      ca->file_name = strdup( optarg );
-      break;
-
-    case 2:
-      free( ca->class_name );
-      ca->class_name = strdup( optarg );
-      break;
-
-    case 3:
-      free( ca->method_name );
-      ca->method_name = strdup( optarg );
-      break;
-
-    default:
-      /* if we have a non-option then we are done and be sure to decrement
-       * optind so we keep the option that caused it to faile
-       */
-      done = 1;
-      optind--;
-      break;
-    }
-  }
- 
-  opterr = old_opterr;
-  return optind;
-}
-
-
 /** 
  * Build a new Amalgalite::Requires instance.
  */
@@ -166,7 +107,6 @@ extern char const _binary_app_sql_end[];
  */
 VALUE carton_wrap_app( VALUE arg )
 {
-  carton_app *ca = (carton_app*)arg;
   char       buf[BUFSIZ];
   char      *dot;
   VALUE      filename_str;
@@ -243,8 +183,6 @@ int main( int argc, char** argv )
   int rc     = 0;
   int opt_mv = 0;
 
-  carton_app ca;
-
   /** startup items from ruby's original main.c */
 #ifdef _WIN32
   NtInitialize(&argc, &argv);
@@ -258,13 +196,14 @@ int main( int argc, char** argv )
   ruby_script( argv[0] );
   ruby_init_loadpath();
 
-  /* strip out the carton specific arguments from argv using --carton- */
-  opt_mv = carton_init_from_options( &ca, argc, argv );
-  argc -= opt_mv;
-  argv += opt_mv;
  
   /* make ARGV available */
   ruby_set_argv( argc, argv );
+  
+  /* Initialize amalgalite. This must be done before other extensions.
+   */
+
+  Init_amalgalite3();
 
   /* initialize all extensions */
   Init_ext();
@@ -276,7 +215,7 @@ int main( int argc, char** argv )
   rb_ary_clear( rb_gv_get( "$LOAD_PATH" ) );
 
   /* invoke the class / method passing in ARGV and ENV */
-  rb_protect( carton_wrap_app, (VALUE)&ca, &state );
+  rb_protect( carton_wrap_app, Qnil, &state );
 
   /* check the results */
   if ( state ) {
