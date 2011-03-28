@@ -1,0 +1,8 @@
+require 'carton/version'
+require 'carton/amalgalite'
+require 'carton/exts'
+require 'carton/gem'
+require 'carton/ruby'
+require 'carton/rvm'
+require 'carton/task'
+require 'carton/app'

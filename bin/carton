@@ -11,601 +11,73 @@
 #       @appfile@.
 # 
 
-# We actually need this as a library
-require 'rubygems'
-# This gives us a Rake application
-require 'rake'
-# We define a custom task type here
-require 'rake/tasklib'
 
-$cc = ENV['CC']
-if $cc.nil? || $cc.empty?
-  $cc = 'gcc'
+require 'optparse'
+require 'carton'
+
+
+def usage(opts)
+  puts opts
+  puts
+  puts <<-INFO
+Carton will build the the ruby currently selected in RVM under BUILDPATH,
+combine it with EXECUTABLE and any other --link files to produce EXECUTABLE,
+a single file, staticly linked executable.
+  INFO
+  exit
 end
 
-$bfdarch = "i386"
-$bfdtarget="elf64-x86-64"
-# $bfdtarget="elf32-i386"
+def parse_opts(args)
+  options = {}
+  opts = OptionParser.new do |opts|
+    opts.banner = "Usage: #{$0} [options]"
 
+    opts.separator ""
+    opts.separator "Specific options:"
 
-class Rake::FileTask
-  def check!
-    raise "Creating #{self.name} failed!" unless
-      File.exists?(self.name)
+    opts.on("-b", "--build_path BUILDPATH",
+            "Required: the directory in which to build the application") do |opt|
+      options[:build_path] = opt
+    end
+    
+    opts.on("-o", "--output EXECUTABLE",
+            "Required: The single-file executable to build") do |opt|
+      options[:output] = opt
+    end
+
+    opts.on("-i", "--input TOPLEVEL",
+            "Required: The entry point ruby file for the application") do |opt|
+      options[:appfile] = opt
+    end
+
+    opts.on("-l", "--link x,y,z",
+            Array, "List of file globs to include") do |opt|
+      options[:globs] = opt
+    end
+
+    opts.on_tail("-h", "--help", "Show this message") do |opt|
+      usage(opts)
+    end
+
+    opts.on_tail("-v", "--version", "Show the version") do |opt|
+      puts Carton::VERSION
+      exit
+    end
+
   end
+  opts.parse!(args)  
+
+  unless options[:build_path] && options[:output] && options[:appfile]
+    usage(opts)
+  end
+
+  return options
 end
 
-class Carton
-
-  class Gem
-    attr_reader :name
-
-    def initialize(name)
-      @name = name
-    end
-
-    def gem_spec
-      raise "Gem #{name} not found!" unless
-        @gem_spec ||= ::Gem.source_index.find_name(name).last
-      @gem_spec
-    end
-    
-    def exists?
-      gem_spec() && true rescue nil
-    end
-
-    def root
-      File.join(gem_spec().full_gem_path)
-    end
-
-    def install
-      self.class.install(self.name)
-    end
-
-    def self.install(name)
-      system "gem install #{name} --no-rdoc --no-ri"
-      return new(name)
-    end
-
-      
-  end
-
-  class ExtSetup
-    def initialize(filename)
-      @filename=filename
-    end
-
-    def enable(*exts)
-      exts.each do |ext|
-        quoted_ext = ext.gsub(%r{/}, '\\/')
-        system "sed -i 's/^\##{quoted_ext}$/#{quoted_ext}/' #{@filename}"
-      end
-    end
-
-
-    def enabled
-      result = []
-      raise "#{@filename} doesn't exist!" unless File.file?(@filename)
-      File.open(@filename) do |f|
-        f.each_line do |line|
-          next if line =~ /\Aoption/
-          next if line.strip.length == 0
-          next if line =~ /\A#/
-
-          result << line.strip
-        end
-      end
-      result
-    end
-
-    def static!
-      enable("option nodynamic")
-    end
-
-  end
-
-  
-
-  class Exts
-    attr_reader :path
-
-    def initialize(path)
-      @path = path
-      @setup = ExtSetup.new(File.join(path, "Setup"))
-    end
-
-    def enable(*exts)
-      @setup.enable(*exts)
-      @setup.static!
-    end
-    
-    def enabled
-      return @setup.enabled().select do |line|
-        prefix = File.join( File.dirname(@path), line.strip, "lib" )
-        File.directory?( prefix )
-      end
-    end
-
-    def libs
-      FileList[File.join(@path, "**", "*.a")]
-    end
-
-  end
-
-
-  # Here we assume that the user has already installed the ruby that
-  # they want to use.  This means that the source *should* be
-  # available at ~/.rvm/src.
-  class RVM
-    def self.rvm
-      File.join(ENV['rvm_path'], "bin", "rvm")
-    end
-
-    def self.ruby_home
-      home_line = `#{rvm} info homes | grep 'ruby:'`
-      if home_line =~ /ruby:\s+"(.*)"/
-        return $1.strip
-      else
-        return nil
-      end
-    end
-
-
-    def self.current
-      current_line = `#{rvm} current`.strip
-      unless current_line.nil? || current_line.empty?
-        return current_line
-      end
-    end
-    
-    def self.lib(libname)
-      return File.join(ENV['rvm_path'], "usr", "lib", libname)
-    end
-
-    def self.enable_exts(*exts)
-      exts.each do |ext|
-
-      end
-    end
-
-    def self.install_package(package)
-      system "#{rvm} package install #{package}"
-    end
-
-    def self.rebuild_ruby
-      system "#{rvm} install #{current} --static"
-    end
-
-    def self.stdlib
-      File.join(self.ruby_home, "lib", "ruby", "1.8")
-    end
-    
-    def self.src
-      File.join(ENV['rvm_path'], "src", self.current)
-    end
-
-    def self.fn_rbconfig
-      # Don't know if this is correct, let's see if it works
-      File.join(self.src, "rbconfig.rb")
-    end
- 
-    def self.ext_dir
-      File.join(self.src, "ext")
-    end
-    
-    def self.exts
-      Exts.new(self.ext_dir)
-    end
-
-
-    def self.rbconfig
-      unless (@compile_params ||= false)
-        @compile_params = {}
-        %w[ CC CFLAGS XCFLAGS LDFLAGS CPPFLAGS LIBS ].each do |p|
-          @compile_params[p] = %x( ruby -rrbconfig -e 'puts Config::CONFIG["#{p}"] || ""' ).strip
-        end
-      end
-      return @compile_params
-
-    end
-
-  end
-
-  class Ruby
-    attr_reader :root
-    def initialize(root)
-      @root = root
-    end
-
-    def fn(*args)
-      File.expand_path(File.join(@root, *args))
-    end
-
-    def fn_stdlib
-      fn("lib")
-    end
-
-    def fn_ext
-      fn("ext")
-    end
-    
-    def exts
-      Exts.new(fn_ext)
-    end
-
-    
-    def rbconfig
-      unless (@compile_params ||= false)
-        @compile_params = {}
-        %w[ CC CFLAGS XCFLAGS LDFLAGS CPPFLAGS LIBS ].each do |p|
-          @compile_params[p] = %x( ruby -r#{fn("rbconfig")} -e 'puts Config::CONFIG["#{p}"] || ""' ).strip
-        end
-      end
-      return @compile_params
-    end
-
-
-    def make
-      Dir.chdir(@root){ raise "Make failed" unless system "make" }
-    end
-  end
-
-
-  class Amalgalite
-    def initialize(fn_db)
-      @fn_db = fn_db
-    end
-  
-    def bin
-      "amalgalite-pack"
-    end
-
-    def pack(opts)
-      sh "#{bin} #{opts}"
-    end
-    
-    def sh(cmd)
-      raise unless system cmd
-    end
-  
-    def add(prefix, files)
-      merged_files = [*files].join(" ")
-      pack "--db #{@fn_db} --compress --strip-prefix #{prefix} #{merged_files}"
-    end
-    
-    def merge(prefix, files)
-      pack "--merge --db #{@fn_db} --compress --strip-prefix #{prefix} #{[*files].join(" ")}"
-    end
-
-    def add_self
-      pack "--drop-table --db #{@fn_db} --self"
-    end
-  end
-
-
-  class Task < Rake::TaskLib
-    def initialize(build_path, outputfile, appfile, include_files)
-      @build_dir = build_path
-      @ruby = Ruby.new(fn_build_file("ruby"))
-      define(outputfile, appfile, include_files)
-    end
-
-
-    def fn_rvm_amalgalite_static
-      amalgalite = Gem.new("amalgalite")
-      return File.join(amalgalite.root, "ext", "amalgalite", "amalgalite3.o")
-    end
-
-
-    # The path into the build directory for the given filename
-    def fn_build_file(*filenames)
-      directory @build_dir
-      result = File.join(@build_dir, *filenames)
-      file result => @build_dir
-      return result
-    end
-
-
-    def pack_ruby(am_db)
-      fn_prefix = @ruby.fn_stdlib
-      am_db.add(fn_prefix, fn_prefix)
-    end
-
-
-    def pack_rbconfig(am_db)
-      fn_rbconfig = @ruby.fn("rbconfig")
-      am_db.add(File.dirname(fn_rbconfig), fn_rbconfig)
-    end
-
-
-    def exts
-      @exts ||= @ruby.exts
-    end
-
-    def pack_exts(am_db)
-      exts.enabled.each do |fn_lib|
-        am_db.merge(fn_lib, fn_lib)
-      end
-    end
-
-    def pack_amalgalite(am_db)
-      am_db.add_self
-    end
-
-    def pack_app_files(am_db, glob)
-      prefix =Dir.pwd
-      expanded_glob = File.expand_path(glob)
-      am_db.add(prefix, expanded_glob)
-    end
-
-    def with_tempfile(orig_name)
-      tmpname = orig_name + ".tmp"
-      rm_f tmpname
-      yield tmpname
-      FileUtils.mv tmpname, orig_name
-    end
-
-
-    def file_copy(from, to)
-      file to => from do |t|
-        sh "cp #{from} #{to}"
-        t.check!
-      end
-    end
-
-
-    def amalgalite_objects
-      amalgalite = Gem.new("amalgalite")
-      amalgalite.install unless amalgalite.exists?
-      FileList[File.join(amalgalite.root, "ext", "amalgalite", "*.o")]
-    end
-
-
-    def fn_carton_boot_c
-      dirname = File.join(File.dirname(__FILE__),'..')
-      return File.expand_path(File.join(dirname, "lib", "carton_boot.c"))
-    end
-
-
-    def define(outputfile, appfile, include_files)
-
-      # These are the default extensions which crate builds, I'll sort
-      # out a different mechanism for specifying these later
-      allowed_exts = %w{
-          bigdecimal
-          digest
-          digest/md5
-          digest/sha1
-          enumerator
-          etc
-          fcntl
-          io/wait
-          nkf
-          socket
-          stringio
-          strscan
-          syck
-          thread
-          zlib
-        }
-#          openssl # because I can't get this working yet
-
-      desc "Copy RVM's cache of the ruby source into our build directory"
-      # This is needed otherwise we risk clobbering the *current* ruby,
-      # which would be Bad.
-      file @ruby.root do |t|
-        sh "cp -a #{RVM.src} #{t.name}"
-        # Clear this out because chances are that our build
-        # choices won't match RVM's, and it might not get 
-        # rebuilt unless it's absent
-        rm_f @ruby.fn("libruby-static.a")
-
-        t.check!
-      end
-   
-
-      file( @ruby.fn("libruby-static.a") => 
-            @ruby.root ) do |t|
-
-        @ruby.exts.enable(*allowed_exts)
-        @ruby.make
-        
-        t.check!
-      end
-
-
-      file RVM.lib("libz.a") do |t|
-        RVM.install_package("zlib")
-        t.check!
-      end
-      
-      # The install_package task here can't rationally be shared
-      # because adding a basic task as a prerequisite to both triggers
-      # a rebuild every invocation. This is because basic tasks have a
-      # timestamp of Time.now, which will be after the timestamps of
-      # the file tasks.
-      file RVM.lib("libcrypto.a") do |t|
-        RVM.install_package("openssl")
-        t.check!
-      end
-
-      file RVM.lib("libssl.a") do |t|
-        RVM.install_package("openssl")
-        t.check!
-      end
-
-
-
-      file fn_build_file("libamalgalite3.a") => amalgalite_objects do |t|
-        sh "ar rcs #{t.name} #{amalgalite_objects.join(" ")}"
-        t.check!
-      end
-
-
-      {
-        "libz.a"           => RVM.lib("libz.a"),
-        "libssl.a"         => RVM.lib("libssl.a"),
-        "libcrypto.a"      => RVM.lib("libcrypto.a"),
-        "libruby-static.a" => @ruby.fn("libruby-static.a"),
-        "extinit.o"        => @ruby.fn("ext","extinit.o")
-      }.
-        each_pair do |to, from|
-        file_copy(from, fn_build_file(to))
-      end
-
-
-
-      file fn_build_file("lib.db") do |t|
-        with_tempfile(t.name) do |tmpname|
-
-          am_lib = Amalgalite.new(tmpname)
-          pack_ruby(am_lib)
-          pack_rbconfig(am_lib)
-          pack_exts(am_lib)
-          pack_amalgalite(am_lib)
-
-        end
-
-        t.check!
-      end
-
-
-      file appfile
-
-      file fn_build_file("app.db") => appfile do |t|
-        with_tempfile(t.name) do |tmpname|
-          am_lib = Amalgalite.new(tmpname)
-          
-          include_files.each do |glob|
-            pack_app_files(am_lib, glob)
-          end
-          pack_app_files(am_lib, appfile)
-
-        end
-        t.check!
-      end
-
-
-      fns_code_obj = [sqldump_obj( fn_build_file("lib.db") ),
-                      sqldump_obj( fn_build_file("app.db") )]
-
-
-      file fn_build_file("librubycode.a") => fns_code_obj do |t|
-        sh "ar rcs #{t.name} #{fns_code_obj.join(" ")}"
-        t.check!
-      end
-
-
-
-
-      file fn_build_file("carton_boot.o") => fn_carton_boot_c() do |t|
-        opts = %W{-D'CARTON_ENTRY="#{appfile}"'
-                  -c #{fn_carton_boot_c()}
-                  #{@ruby.rbconfig['CFLAGS']}
-                  #{@ruby.rbconfig['XCFLAGS']}
-                  #{@ruby.rbconfig['CPPFLAGS']}
-                  -I #{@ruby.root}
-                  -o #{t.name}
-        }
-        sh "#{@ruby.rbconfig['CC']} #{opts.join(" ")}"
-        t.check!
-      end
-      
-      libs = %w{ssl
-                crypto
-                z
-                ruby-static
-                rubycode
-                amalgalite3
-      }
-      objs = %w{
-                carton_boot
-      }.map{|o| o+".o"}
-
-      obj_files = (libs.map{|l| "lib#{l}.a"}+objs).
-        map{|f| fn_build_file(f)}
-
-
-      desc "Build the static objects"
-      task :obj_files => obj_files + [fn_build_file("extinit.o")]
-
-      directory File.dirname(outputfile)
-
-      desc "Build the executable"
-      file outputfile => [:obj_files, File.dirname(outputfile)] do |t|
-        # These should be another task, but since we can't know ahead of time what .a files 
-        # the ruby build is actually going to produce, we can't build it.
-        fns_exts = @ruby.exts.libs
-          
-        lib_opts = libs.map{|l| "-l"+l}.join(" ")
-        ruby_link_opts = @ruby.rbconfig['LIBS']
-        sh %W{gcc -static 
-              #{fn_build_file("extinit.o")} 
-              #{fns_exts.join(" ")} 
-              #{objs.map{|o| fn_build_file(o)}.join(" ")}
-              -L#{@build_dir}
-              #{lib_opts}
-              #{ruby_link_opts}
-              -o #{t.name}}.join(" ")
-
-        t.check!
-        puts "#{t.name} built."
-      end
-      
-      self
-    end
-
-
-    def sqldump_obj(fn_db)
-      name = File.basename(fn_db, ".db")
-      fn_sql = fn_build_file("#{name}.sql")
-      fn_obj = fn_build_file("#{name}.o")
-
-      file fn_sql => fn_db do |t|
-        sh "sqlite3 #{fn_db} '.dump' > #{fn_sql}"
-        t.check!
-      end
-
-      file fn_obj => fn_sql do |t|
-        target = File.expand_path(t.name)
-        Dir.chdir(File.dirname(fn_sql)) do
-          sh "objcopy -Ibinary -O  #{$bfdtarget} -B #{$bfdarch} #{File.basename(fn_sql)} #{target}"
-        end
-        t.check!
-      end
-    end
-
-  end
-
-  def initialize
-    @app = Rake.application
-    @app.init("carton")
-  end
-
-  def run(build_path, outputfile, appfile, include_files)
-    # HACKHACKHACK
-    if build_path && outputfile && appfile && include_files
-      Task.new(build_path, outputfile, appfile, include_files)
-      @app.invoke_task(outputfile)
-    else
-      help()
-    end
-  end
-
-  def help
-    @app.display_tasks_and_comments
-  end
-end
-
-def usage
-  $stderr.puts "Usage: #{$0} <build_path> <outputfile> <appfile> [<includefile>*]"
-end
 
 if __FILE__==$0
-  build_path, outputfile, appfile, *globs = ARGV
-  unless build_path && outputfile && appfile
-    usage()
-    exit
-  end
-  Carton.new.run(build_path, outputfile, appfile, globs)
+  options = parse_opts(ARGV)
+
+
+  Carton::App.new.run(build_path, outputfile, appfile, globs)
 end
