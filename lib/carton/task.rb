@@ -1,10 +1,6 @@
 require 'rake'
 require "rake/tasklib"
 
-$bfdarch = "i386"
-$bfdtarget="elf64-x86-64"
-# $bfdtarget="elf32-i386"
-
 $cc = ENV['CC']
 if $cc.nil? || $cc.empty?
   $cc = 'gcc'
@@ -21,6 +17,24 @@ end
 
 module Carton
   
+  # Wrap the objcopy command, hopefully also picking the correct
+  # binary format and target
+  class Objcopy
+    def initialize
+      
+      # @bfdarch = "i386"
+      # @bfdtarget="elf64-x86-64"
+      # @bfdtarget="elf32-i386"
+
+      header, @bfdtarget,meta, @bfdarch  = `objdump -i 2> /dev/null`.split("\n")[0..3].map{|s| s.strip}
+      raise "Bad bfdtarget (#{@bfdtarget.inspect})!" unless @bfdtarget
+      raise "Bad bfdarch (#{@bfdarch.inspect})!" unless @bfdarch
+    end
+    
+    def import(infile, outfile)
+      sh "objcopy -Ibinary -O  #{@bfdtarget} -B #{@bfdarch} #{infile} #{outfile}"
+    end
+  end
 
   class Task < Rake::TaskLib
 
@@ -309,7 +323,7 @@ module Carton
       file fn_obj => fn_sql do |t|
         target = File.expand_path(t.name)
         Dir.chdir(File.dirname(fn_sql)) do
-          sh "objcopy -Ibinary -O  #{$bfdtarget} -B #{$bfdarch} #{File.basename(fn_sql)} #{target}"
+          Objcopy.new.import(File.basename(fn_sql), target)
         end
         t.check!
       end
