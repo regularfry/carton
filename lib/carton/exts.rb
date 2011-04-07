@@ -1,3 +1,5 @@
+require 'carton/ext_setup'
+
 module Carton
 
   # Handler for ruby extensions. Can enable extensions by name (via an

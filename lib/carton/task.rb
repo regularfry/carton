@@ -117,7 +117,7 @@ module Carton
 
     def fn_carton_boot_c
       dirname = File.join(File.dirname(__FILE__),'..')
-      return File.expand_path(File.join(dirname, "lib", "carton_boot.c"))
+      return File.expand_path(File.join(dirname, "carton_boot.c"))
     end
 
 

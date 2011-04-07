@@ -28,7 +28,9 @@ a single file, staticly linked executable.
 end
 
 def parse_opts(args)
-  options = {}
+  options = {:build_path => "build",
+    :globs => []
+  }
   opts = OptionParser.new do |opts|
     opts.banner = "Usage: #{$0} [options]"
 
@@ -79,5 +81,8 @@ if __FILE__==$0
   options = parse_opts(ARGV)
 
 
-  Carton::App.new.run(build_path, outputfile, appfile, globs)
+  Carton::App.new.run(options[:build_path], 
+                      options[:output], 
+                      options[:appfile],
+                      options[:globs])
 end
