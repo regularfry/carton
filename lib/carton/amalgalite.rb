@@ -15,6 +15,7 @@ module Carton
     end
     
     def sh(cmd)
+      puts cmd
       raise unless system cmd
     end
   

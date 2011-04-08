@@ -38,10 +38,10 @@ module Carton
 
   class Task < Rake::TaskLib
 
-    def initialize(build_path, outputfile, appfile, include_files)
+    def initialize(build_path, outputfile, appfile, include_files, load_path)
       @build_dir = build_path
       @ruby = Ruby.new(fn_build_file("ruby"))
-      define(outputfile, appfile, include_files)
+      define(outputfile, appfile, include_files, load_path)
     end
 
 
@@ -86,10 +86,24 @@ module Carton
       am_db.add_self
     end
 
-    def pack_app_files(am_db, glob)
-      prefix =Dir.pwd
+    # load_path is expected to be a colon-separated
+    # set of paths
+    def pack_app_files(am_db, glob, load_path=".")
+      load_paths_arr = load_path.split(":").
+        map{|lp| File.expand_path(lp)}
+
       expanded_glob = File.expand_path(glob)
-      am_db.add(prefix, expanded_glob)
+
+      Dir[expanded_glob].each do |filename|
+        # ok, now which load_path entry do I want?
+        prefix = load_paths_arr.find{|lp|
+          filename.start_with?(lp)
+        }
+        # No prefix? Pretend we're 1.8 and use pwd
+        prefix ||= Dir.pwd
+        
+        am_db.add(prefix, filename)
+      end
     end
 
     def with_tempfile(orig_name)
@@ -121,7 +135,7 @@ module Carton
     end
 
 
-    def define(outputfile, appfile, include_files)
+    def define(outputfile, appfile, include_files, load_path)
 
       # These are the default extensions which crate builds, I'll sort
       # out a different mechanism for specifying these later
@@ -231,8 +245,14 @@ module Carton
           am_lib = Amalgalite.new(tmpname)
           
           include_files.each do |glob|
-            pack_app_files(am_lib, glob)
+            # We need to use the load_path here for the include
+            # files, because they're going to be required by the
+            # appfile based on LOAD_PATH
+            pack_app_files(am_lib, glob, load_path)
           end
+          # We don't bother with load_path here, because it's
+          # the entry point and *presumably* we don't need
+          # to care that nothing else can necessarily find it.
           pack_app_files(am_lib, appfile)
 
         end

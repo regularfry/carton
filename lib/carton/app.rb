@@ -11,10 +11,10 @@ module Carton
       @app.init("carton")
     end
 
-    def run(build_path, outputfile, appfile, include_files)
+    def run(build_path, outputfile, appfile, include_files, load_path)
       # HACKHACKHACK
       if build_path && outputfile && appfile
-        Task.new(build_path, outputfile, appfile, include_files)
+        Task.new(build_path, outputfile, appfile, include_files, load_path)
         @app.invoke_task(outputfile)
       else
         help()

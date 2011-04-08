@@ -29,6 +29,7 @@ end
 
 def parse_opts(args)
   options = {:build_path => "build",
+    :load_path => "lib",
     :globs => []
   }
   opts = OptionParser.new do |opts|
@@ -57,6 +58,11 @@ def parse_opts(args)
       options[:globs] = opt
     end
 
+    opts.on("-L", "--load_path LOAD_PATH",
+            "Load path") do |opt|
+      options[:load_path] = opt
+    end
+
     opts.on_tail("-h", "--help", "Show this message") do |opt|
       usage(opts)
     end
@@ -83,5 +89,6 @@ options = parse_opts(ARGV)
 Carton::App.new.run(options[:build_path], 
                     options[:output], 
                     options[:appfile],
-                    options[:globs])
+                    options[:globs],
+                    options[:load_path])
 
