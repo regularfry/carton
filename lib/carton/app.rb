@@ -13,9 +13,6 @@ module Carton
 
     def run(build_path, outputfile, appfile, include_files)
       # HACKHACKHACK
-      p build_path
-      p outputfile
-      p appfile
       if build_path && outputfile && appfile
         Task.new(build_path, outputfile, appfile, include_files)
         @app.invoke_task(outputfile)

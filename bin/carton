@@ -77,12 +77,11 @@ def parse_opts(args)
 end
 
 
-if __FILE__==$0
-  options = parse_opts(ARGV)
+options = parse_opts(ARGV)
 
 
-  Carton::App.new.run(options[:build_path], 
-                      options[:output], 
-                      options[:appfile],
-                      options[:globs])
-end
+Carton::App.new.run(options[:build_path], 
+                    options[:output], 
+                    options[:appfile],
+                    options[:globs])
+
