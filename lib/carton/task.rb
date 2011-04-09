@@ -88,7 +88,7 @@ module Carton
 
     # load_path is expected to be a colon-separated
     # set of paths
-    def pack_app_files(am_db, glob, load_path=".")
+    def pack_app_files(am_db, glob, load_path="lib:.")
       load_paths_arr = load_path.split(":").
         map{|lp| File.expand_path(lp)}
 
