@@ -1,3 +1,4 @@
+require 'rake'
 require 'carton/ext_setup'
 
 module Carton
@@ -13,11 +14,13 @@ module Carton
       @setup = ExtSetup.new(File.join(path, "Setup"))
     end
 
+
     def enable(*exts)
       @setup.enable(*exts)
       @setup.static!
     end
     
+
     def enabled
       return @setup.enabled().select do |line|
         prefix = File.join( File.dirname(@path), line.strip, "lib" )
@@ -25,10 +28,13 @@ module Carton
       end
     end
 
+
     def libs
       FileList[File.join(@path, "**", "*.a")]
     end
 
-  end
+
+  end # class Exts 
+
 
 end # module Cargon
