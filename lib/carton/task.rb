@@ -1,5 +1,6 @@
 require 'rake'
 require "rake/tasklib"
+require 'rubygems'
 
 $cc = ENV['CC']
 if $cc.nil? || $cc.empty?
@@ -147,6 +148,7 @@ module Carton
           enumerator
           etc
           fcntl
+          iconv
           io/wait
           nkf
           socket
@@ -240,7 +242,7 @@ module Carton
 
       file appfile
 
-      file fn_build_file("app.db") => appfile do |t|
+      file fn_build_file("app.db") => [appfile, *include_files] do |t|
         with_tempfile(t.name) do |tmpname|
           am_lib = Amalgalite.new(tmpname)
           
@@ -259,8 +261,78 @@ module Carton
         t.check!
       end
 
+      @fn_gemdir = fn_build_file("gems")
+      directory @fn_gemdir
+      file @fn_gemdir => "Gemfile" do |t|
+        # First, install the gems into the build dir
+        # Use bundler to grab the gems, but gem itself
+        # to do the install. This is needed because
+        # bundler remembers install paths in a way
+        # that can't be undone except by doing another
+        # bundle install.
+        # The downside to this is that it can't (I
+        # don't think) be done offline.
+        sh "bundle package"
+        fns_gem_files = FileList['vendor/cache/*.gem']
+        cmd = %W{gem install #{fns_gem_files.join(" ")} 
+                --install-dir #{t.name}
+                --no-rdoc --no-ri}.join(" ")
+        sh cmd
+      end
+
+      # TODO: This needs factoring out
+      file fn_build_file("gem.db") => @fn_gemdir do |t|
+        begin
+          ::Gem.use_paths(@fn_gemdir)
+          si = ::Gem.source_index
+          with_tempfile(t.name) do |tmpname|
+            am = Amalgalite.new(tmpname)
+            # Cache the files so we minimise the calls to am.add
+            full_lib_files = Hash.new{|h,k| h[k]=Array.new}
+
+            # For each gem which got installed,
+            si.all_gems.values.each do |gemspec|
+            
+              # Figure out the prefix and add to am
+              gemspec.lib_files.each do |lib_file|
+                done = false
+                gemspec.require_paths.each do |load_path|
+                  if lib_file.start_with?(load_path)
+                    prefix = File.join(gemspec.full_gem_path,
+                                       load_path)
+                    full_lib_file = File.join(gemspec.full_gem_path,
+                                              lib_file)
+                    full_lib_files[prefix] << full_lib_file
+                    done = true
+                    break
+                  end
+                end
+                
+                if !done
+                  # Then we couldn't associate the lib_file with any
+                  # load_path. This is bad, and it doesn't make sense
+                  # to try to recover here.
+                  raise "Couldn't pack #{lib_file} from #{gemspec.full_name}"
+                end
+                
+              end # lib_files.each
+            end # all_gems.values.each
+            
+            full_lib_files.each_pair do |prefix, filenames|
+              am.add(prefix, filenames)
+            end
+
+          end # with_tempfile
+        ensure
+          ::Gem.clear_paths
+        end
+        t.check!
+        # TODO: Figure out what to do with extensions.
+      end
+
 
       fns_code_obj = [sqldump_obj( fn_build_file("lib.db") ),
+                      sqldump_obj( fn_build_file("gem.db") ),
                       sqldump_obj( fn_build_file("app.db") )]
 
 

@@ -30,7 +30,7 @@ end
 def parse_opts(args)
   options = {:build_path => "build",
     :load_path => "lib",
-    :globs => []
+    :globs => ["lib/**/*.rb", ""]
   }
   opts = OptionParser.new do |opts|
     opts.banner = "Usage: #{$0} [options]"
@@ -63,6 +63,11 @@ def parse_opts(args)
       options[:load_path] = opt
     end
 
+    opts.on("-t", "--task CARTON_TASK",
+            "Internal task to run") do |opt|
+      options[:carton_task] = opt
+    end
+
     opts.on_tail("-h", "--help", "Show this message") do |opt|
       usage(opts)
     end
@@ -90,5 +95,6 @@ Carton::App.new.run(options[:build_path],
                     options[:output], 
                     options[:appfile],
                     options[:globs],
-                    options[:load_path])
+                    options[:load_path],
+                    options[:carton_task])
 

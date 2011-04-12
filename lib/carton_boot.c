@@ -97,6 +97,8 @@ VALUE am_require( VALUE filename )
  */
 extern char const _binary_lib_sql_start[];
 extern char const _binary_lib_sql_end[];
+extern char const _binary_gem_sql_start[];
+extern char const _binary_gem_sql_end[];
 extern char const _binary_app_sql_start[];
 extern char const _binary_app_sql_end[];
 
@@ -114,12 +116,15 @@ VALUE carton_wrap_app( VALUE arg )
   /* Linked buffers */
   VALUE      s_lib_sql = buffer_to_s( _binary_lib_sql_start, 
 				      _binary_lib_sql_end );
+  VALUE      s_gem_sql = buffer_to_s( _binary_gem_sql_start,
+				      _binary_gem_sql_end );
   VALUE      s_app_sql = buffer_to_s( _binary_app_sql_start, 
 				      _binary_app_sql_end );
   char       file_name[] = CARTON_ENTRY;
  
   /* Load the SQL from the buffers  */
   import_from_s(s_lib_sql);
+  import_from_s(s_gem_sql);
   import_from_s(s_app_sql);
 		     
   /* require the entry point file, ditching any trailing extension
