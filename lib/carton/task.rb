@@ -42,6 +42,7 @@ module Carton
     def initialize(build_path, outputfile, appfile, include_files, load_path)
       @build_dir = build_path
       @ruby = Ruby.new(fn_build_file("ruby"))
+      @gems_needed = File.file?("Gemfile")
       define(outputfile, appfile, include_files, load_path)
     end
 
@@ -242,7 +243,7 @@ module Carton
 
       file appfile
 
-      file fn_build_file("app.db") => [appfile, *include_files] do |t|
+      file fn_build_file("app.db") => FileList[*include_files] << appfile do |t|
         with_tempfile(t.name) do |tmpname|
           am_lib = Amalgalite.new(tmpname)
           
@@ -263,7 +264,8 @@ module Carton
 
       @fn_gemdir = fn_build_file("gems")
       directory @fn_gemdir
-      file @fn_gemdir => "Gemfile" do |t|
+
+      file @fn_gemdir => FileList["Gemfile"].existing do |t|
         # First, install the gems into the build dir
         # Use bundler to grab the gems, but gem itself
         # to do the install. This is needed because
@@ -272,13 +274,17 @@ module Carton
         # bundle install.
         # The downside to this is that it can't (I
         # don't think) be done offline.
-        sh "bundle package"
-        fns_gem_files = FileList['vendor/cache/*.gem']
-        cmd = %W{gem install #{fns_gem_files.join(" ")} 
-                --install-dir #{t.name}
-                --no-rdoc --no-ri}.join(" ")
-        sh cmd
+        mkdir_p( @fn_gemdir )
+        if File.file?("Gemfile")
+          sh "bundle package"
+          fns_gem_files = FileList['vendor/cache/*.gem']
+          cmd = %W{gem install #{fns_gem_files.join(" ")} 
+                  --install-dir #{t.name}
+                  --no-rdoc --no-ri}.join(" ")
+          sh cmd
+        end
       end
+
 
       # TODO: This needs factoring out
       file fn_build_file("gem.db") => @fn_gemdir do |t|
@@ -292,28 +298,26 @@ module Carton
 
             # For each gem which got installed,
             si.all_gems.values.each do |gemspec|
-            
-              # Figure out the prefix and add to am
+              
               gemspec.lib_files.each do |lib_file|
-                done = false
-                gemspec.require_paths.each do |load_path|
-                  if lib_file.start_with?(load_path)
-                    prefix = File.join(gemspec.full_gem_path,
-                                       load_path)
-                    full_lib_file = File.join(gemspec.full_gem_path,
-                                              lib_file)
-                    full_lib_files[prefix] << full_lib_file
-                    done = true
-                    break
+                catch :done do
+                  # Figure out the correct prefix and add to am
+                  gemspec.require_paths.each do |load_path|
+                    if lib_file.start_with?(load_path)
+                      prefix        = File.join(gemspec.full_gem_path, load_path)
+                      full_lib_file = File.join(gemspec.full_gem_path, lib_file)
+
+                      full_lib_files[prefix] << full_lib_file
+                      
+                      throw :done
+                    end
                   end
-                end
-                
-                if !done
-                  # Then we couldn't associate the lib_file with any
-                  # load_path. This is bad, and it doesn't make sense
-                  # to try to recover here.
-                  raise "Couldn't pack #{lib_file} from #{gemspec.full_name}"
-                end
+                  
+                  # If we're here then we couldn't associate the
+                  # lib_file with any load_path. This is bad, and it
+                  # doesn't make sense to try to recover.
+                  raise "Couldn't pack #{lib_file} from #{gemspec.full_name}."
+                end # catch :done
                 
               end # lib_files.each
             end # all_gems.values.each
@@ -332,8 +336,8 @@ module Carton
 
 
       fns_code_obj = [sqldump_obj( fn_build_file("lib.db") ),
-                      sqldump_obj( fn_build_file("gem.db") ),
-                      sqldump_obj( fn_build_file("app.db") )]
+                      @gems_needed ? sqldump_obj( fn_build_file("gem.db") ) : nil,
+                      sqldump_obj( fn_build_file("app.db") )].compact
 
 
       file fn_build_file("librubycode.a") => fns_code_obj do |t|
@@ -346,6 +350,7 @@ module Carton
 
       file fn_build_file("carton_boot.o") => fn_carton_boot_c() do |t|
         opts = %W{-D'CARTON_ENTRY="#{appfile}"'
+                  #{@gems_needed ? "-DWITH_GEMS" : ""}
                   -c #{fn_carton_boot_c()}
                   #{@ruby.rbconfig['CFLAGS']}
                   #{@ruby.rbconfig['XCFLAGS']}
