@@ -30,7 +30,7 @@ end
 def parse_opts(args)
   options = {:build_path => "build",
     :load_path => "lib",
-    :globs => ["lib/**/*.rb", ""]
+    :globs => ["lib/**/*.rb"]
   }
   opts = OptionParser.new do |opts|
     opts.banner = "Usage: #{$0} [options]"
@@ -38,11 +38,6 @@ def parse_opts(args)
     opts.separator ""
     opts.separator "Specific options:"
 
-    opts.on("-b", "--build_path BUILDPATH",
-            "Required: the directory in which to build the application") do |opt|
-      options[:build_path] = opt
-    end
-    
     opts.on("-o", "--output EXECUTABLE",
             "Required: The single-file executable to build") do |opt|
       options[:output] = opt
@@ -53,13 +48,18 @@ def parse_opts(args)
       options[:appfile] = opt
     end
 
+    opts.on("-b", "--build_path BUILDPATH",
+            "The directory in which to build the application (default build)") do |opt|
+      options[:build_path] = opt
+    end
+    
     opts.on("-l", "--link x,y,z",
-            Array, "List of file globs to include") do |opt|
+            Array, "List of file globs to include (default lib/**/*.rb)") do |opt|
       options[:globs] = opt
     end
 
     opts.on("-L", "--load_path LOAD_PATH",
-            "Load path") do |opt|
+            "Load path (default lib)") do |opt|
       options[:load_path] = opt
     end
 
