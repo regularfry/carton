@@ -1,5 +1,6 @@
 require 'rake/testtask'
 
+desc "Build the gem"
 task :gem do
   sh "gem build carton.gemspec"
 end
