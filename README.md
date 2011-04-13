@@ -193,4 +193,4 @@ the cleverness involved in the require mechanism is down to
 amalgalite.
 
 Once you've taken out that original work, the pile of bugs that
-remains is entirely Alex Young <alex@bytemark.co.uk>'s fault.
+remains is entirely [Alex Young](mailto:alex@bytemark.co.uk)'s fault.
