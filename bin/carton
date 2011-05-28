@@ -68,6 +68,11 @@ def parse_opts(args)
       options[:carton_task] = opt
     end
 
+    opts.on("-V", "--verbose",
+            "Verbose output") do |opts|
+      options[:verbose] = true
+    end
+
     opts.on_tail("-h", "--help", "Show this message") do |opt|
       usage(opts)
     end
@@ -96,5 +101,6 @@ Carton::App.new.run(options[:build_path],
                     options[:appfile],
                     options[:globs],
                     options[:load_path],
-                    options[:carton_task])
+                    options[:carton_task],
+                    options[:verbose])
 

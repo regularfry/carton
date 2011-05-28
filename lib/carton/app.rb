@@ -16,10 +16,12 @@ module Carton
             appfile, 
             include_files, 
             load_path,
-            carton_task=nil)
+            carton_task=nil,
+            verbose=false)
       # HACKHACKHACK
       if build_path && outputfile && appfile
         Task.new(build_path, outputfile, appfile, include_files, load_path)
+        @app.options.trace = verbose
         @app.invoke_task(carton_task || outputfile)
       else
         help()
