@@ -291,42 +291,33 @@ module Carton
         begin
           ::Gem.use_paths(@fn_gemdir)
           si = ::Gem.source_index
+          # Cache the files so we minimise the calls to am.add
+          full_lib_files = Hash.new{|h,k| h[k]=Array.new}
+
+          # For each gem which got installed,
+          si.all_gems.values.each do |gemspec|
+            # Figure out the correct prefix and add to am
+            gemspec.require_paths.each do |load_path|
+              prefix = File.join(gemspec.full_gem_path, load_path)
+              Dir.chdir(prefix) do
+                Dir['**/*'].each do |lib_file|
+                  full_lib_files[prefix] << lib_file
+                end
+              end
+
+            end # catch :done
+
+          end # all_gems.values.each
+
           with_tempfile(t.name) do |tmpname|
             am = Amalgalite.new(tmpname)
-            # Cache the files so we minimise the calls to am.add
-            full_lib_files = Hash.new{|h,k| h[k]=Array.new}
 
-            # For each gem which got installed,
-            si.all_gems.values.each do |gemspec|
-              
-              gemspec.lib_files.each do |lib_file|
-                catch :done do
-                  # Figure out the correct prefix and add to am
-                  gemspec.require_paths.each do |load_path|
-                    if lib_file.start_with?(load_path)
-                      prefix        = File.join(gemspec.full_gem_path, load_path)
-                      full_lib_file = File.join(gemspec.full_gem_path, lib_file)
-
-                      full_lib_files[prefix] << full_lib_file
-                      
-                      throw :done
-                    end
-                  end
-                  
-                  # If we're here then we couldn't associate the
-                  # lib_file with any load_path. This is bad, and it
-                  # doesn't make sense to try to recover.
-                  raise "Couldn't pack #{lib_file} from #{gemspec.full_name}."
-                end # catch :done
-                
-              end # lib_files.each
-            end # all_gems.values.each
-            
             full_lib_files.each_pair do |prefix, filenames|
               am.add(prefix, filenames)
             end
 
           end # with_tempfile
+        
         ensure
           ::Gem.clear_paths
         end
