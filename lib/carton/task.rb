@@ -21,35 +21,51 @@ module Carton
   # Wrap the objcopy command, hopefully also picking the correct
   # binary format and target
   class Objcopy
+    #
+    # Grab the correct values from the installed objdump
     def initialize
       
-      # @bfdarch = "i386"
-      # @bfdtarget="elf64-x86-64"
-      # @bfdtarget="elf32-i386"
+      # Example values are:
+      #  @bfdarch = "i386"
+      #  @bfdtarget="elf64-x86-64"
+      #  @bfdtarget="elf32-i386"
 
-      header, @bfdtarget,meta, @bfdarch  = `objdump -i 2> /dev/null`.split("\n")[0..3].map{|s| s.strip}
+      header, @bfdtarget,meta, @bfdarch  = 
+        `objdump -i 2> /dev/null`.split("\n")[0..3].map{|s| s.strip}
+
       raise "Bad bfdtarget (#{@bfdtarget.inspect})!" unless @bfdtarget
       raise "Bad bfdarch (#{@bfdarch.inspect})!" unless @bfdarch
     end
     
+    # Copy a binary input file into the object outfile.
     def import(infile, outfile)
-      sh "objcopy -Ibinary -O  #{@bfdtarget} -B #{@bfdarch} #{infile} #{outfile}"
+      sh %W{objcopy -Ibinary 
+            -O #{@bfdtarget} 
+            -B #{@bfdarch} 
+            #{infile} #{outfile}"}.join(" ")
     end
   end
 
   class Task < Rake::TaskLib
 
-    def initialize(build_path, outputfile, appfile, include_files, load_path)
+    def initialize(build_path, 
+                   outputfile, 
+                   appfile, 
+                   include_files, 
+                   load_path)
+
       @build_dir = build_path
       @ruby = Ruby.new(fn_build_file("ruby"))
       @gems_needed = File.file?("Gemfile")
       define(outputfile, appfile, include_files, load_path)
+
     end
 
 
     def fn_rvm_amalgalite_static
       amalgalite = Gem.new("amalgalite")
-      return File.join(amalgalite.root, "ext", "amalgalite", "amalgalite3.o")
+      return File.join(amalgalite.root, "ext", 
+                       "amalgalite", "amalgalite3.o")
     end
 
 
@@ -161,7 +177,8 @@ module Carton
         }
 #          openssl # because I can't get this working yet
 
-      desc "Copy RVM's cache of the ruby source into our build directory"
+      desc(
+        "Copy RVM's cache of the ruby source into our build directory")
       # This is needed otherwise we risk clobbering the *current* ruby,
       # which would be Bad.
       file @ruby.root do |t|
@@ -207,7 +224,8 @@ module Carton
 
 
 
-      file fn_build_file("libamalgalite3.a") => amalgalite_objects do |t|
+      file( fn_build_file("libamalgalite3.a") => 
+              amalgalite_objects ) do |t|
         sh "ar rcs #{t.name} #{amalgalite_objects.join(" ")}"
         t.check!
       end
@@ -243,7 +261,8 @@ module Carton
 
       file appfile
 
-      file fn_build_file("app.db") => FileList[*include_files] << appfile do |t|
+      file( fn_build_file("app.db") => 
+              FileList[*include_files] << appfile ) do |t|
         with_tempfile(t.name) do |tmpname|
           am_lib = Amalgalite.new(tmpname)
           
@@ -327,7 +346,9 @@ module Carton
 
 
       fns_code_obj = [sqldump_obj( fn_build_file("lib.db") ),
-                      @gems_needed ? sqldump_obj( fn_build_file("gem.db") ) : nil,
+                      @gems_needed ? 
+                        sqldump_obj( fn_build_file("gem.db") ) : 
+                        nil,
                       sqldump_obj( fn_build_file("app.db") )].compact
 
 
@@ -375,8 +396,9 @@ module Carton
 
       desc "Build the executable"
       file outputfile => [:obj_files, File.dirname(outputfile)] do |t|
-        # These should be another task, but since we can't know ahead of time what .a files 
-        # the ruby build is actually going to produce, we can't build it.
+        # These should be another task, but since we can't know ahead of
+        # time what .a files the ruby build is actually going to 
+        # produce, we can't build it.
         fns_exts = @ruby.exts.libs
           
         lib_opts = libs.map{|l| "-l"+l}.join(" ")
