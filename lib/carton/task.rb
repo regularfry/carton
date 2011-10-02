@@ -1,6 +1,7 @@
 require 'rake'
 require "rake/tasklib"
 require 'rubygems'
+require 'path'
 
 $cc = ENV['CC']
 if $cc.nil? || $cc.empty?
@@ -42,20 +43,23 @@ module Carton
       sh %W{objcopy -Ibinary 
             -O #{@bfdtarget} 
             -B #{@bfdarch} 
-            #{infile} #{outfile}"}.join(" ")
+            #{infile} #{outfile}}.join(" ")
     end
   end
 
   class Task < Rake::TaskLib
 
-    def initialize(build_path, 
+    def initialize(rubydir,
+                   build_path, 
                    outputfile, 
                    appfile, 
                    include_files, 
                    load_path)
 
-      @build_dir = build_path
+      @rubydir = Path(rubydir)
+      @build_dir = Path(build_path)
       @ruby = Ruby.new(fn_build_file("ruby"))
+      @ruby_fakeroot = fn_build_file("ruby_fakeroot")
       @gems_needed = File.file?("Gemfile")
       define(outputfile, appfile, include_files, load_path)
 
@@ -64,15 +68,14 @@ module Carton
 
     def fn_rvm_amalgalite_static
       amalgalite = Gem.new("amalgalite")
-      return File.join(amalgalite.root, "ext", 
-                       "amalgalite", "amalgalite3.o")
+      return Path(amalgalite.root)/"ext"/"amalgalite"/"amalgalite3.o"
     end
 
 
     # The path into the build directory for the given filename
     def fn_build_file(*filenames)
       directory @build_dir
-      result = File.join(@build_dir, *filenames)
+      result = @build_dir./(*filenames)
       file result => @build_dir
       return result
     end
@@ -86,7 +89,7 @@ module Carton
 
     def pack_rbconfig(am_db)
       fn_rbconfig = @ruby.fn("rbconfig")
-      am_db.add(File.dirname(fn_rbconfig), fn_rbconfig)
+      am_db.add(fn_rbconfig.dirname, fn_rbconfig)
     end
 
 
@@ -95,7 +98,11 @@ module Carton
     end
 
     def pack_exts(am_db)
+      puts "*"*40
+      p exts.enabled
+      puts "*"*40
       exts.enabled.each do |fn_lib|
+        p :fn_lib => fn_lib
         am_db.merge(fn_lib, fn_lib)
       end
     end
@@ -108,9 +115,9 @@ module Carton
     # set of paths
     def pack_app_files(am_db, glob, load_path="lib:.")
       load_paths_arr = load_path.split(":").
-        map{|lp| File.expand_path(lp)}
+        map{|lp| Path(lp).expand}
 
-      expanded_glob = File.expand_path(glob)
+      expanded_glob = Path(glob).expand
 
       Dir[expanded_glob].each do |filename|
         # ok, now which load_path entry do I want?
@@ -125,10 +132,10 @@ module Carton
     end
 
     def with_tempfile(orig_name)
-      tmpname = orig_name + ".tmp"
-      rm_f tmpname
+      tmpname = Path(orig_name + ".tmp")
+      tmpname.rm_rf
       yield tmpname
-      FileUtils.mv tmpname, orig_name
+      tmpname.mv orig_name
     end
 
 
@@ -143,13 +150,12 @@ module Carton
     def amalgalite_objects
       amalgalite = Gem.new("amalgalite")
       amalgalite.install unless amalgalite.exists?
-      FileList[File.join(amalgalite.root, "ext", "amalgalite", "*.o")]
+      FileList[amalgalite.root/"ext"/"amalgalite"/"*.o"]
     end
 
 
     def fn_carton_boot_c
-      dirname = File.join(File.dirname(__FILE__),'..')
-      return File.expand_path(File.join(dirname, "carton_boot.c"))
+      return (Path(__FILE__).dir/".."/"carton_boot.c").expand
     end
 
 
@@ -167,6 +173,7 @@ module Carton
           fcntl
           iconv
           io/wait
+          openssl 
           nkf
           socket
           stringio
@@ -175,18 +182,22 @@ module Carton
           thread
           zlib
         }
-#          openssl # because I can't get this working yet
+      allowed_exts = %w{}
+#          
 
       desc(
         "Copy RVM's cache of the ruby source into our build directory")
       # This is needed otherwise we risk clobbering the *current* ruby,
       # which would be Bad.
       file @ruby.root do |t|
-        sh "cp -a #{RVM.src} #{t.name}"
+        root = Path(t.name)
+        sh "cp -a #{RVM.src} #{root}"
         # Clear this out because chances are that our build
         # choices won't match RVM's, and it might not get 
         # rebuilt unless it's absent
-        rm_f @ruby.fn("libruby-static.a")
+        root.chdir{ system "make clean" }
+        raise "Didn't clear libruby-static.a" if
+          (root/"libruby-static.a").file?
 
         t.check!
       end
@@ -196,7 +207,7 @@ module Carton
             @ruby.root ) do |t|
 
         @ruby.exts.enable(*allowed_exts)
-        @ruby.make
+        @ruby.make(@ruby_fakeroot)
         
         t.check!
       end
@@ -293,8 +304,8 @@ module Carton
         # bundle install.
         # The downside to this is that it can't (I
         # don't think) be done offline.
-        mkdir_p( @fn_gemdir )
-        if File.file?("Gemfile")
+        @fn_gemdir.mkdir_p
+        if Path("Gemfile").file?
           sh "bundle package"
           fns_gem_files = FileList['vendor/cache/*.gem']
           cmd = %W{gem install #{fns_gem_files.join(" ")} 
@@ -317,10 +328,10 @@ module Carton
           si.all_gems.values.each do |gemspec|
             # Figure out the correct prefix and add to am
             gemspec.require_paths.each do |load_path|
-              prefix = File.join(gemspec.full_gem_path, load_path)
-              Dir.chdir(prefix) do
+              prefix = Path(gemspec.full_gem_path)/load_path
+              prefix.chdir do
                 Dir['**/*'].each do |lib_file|
-                  full_lib_files[prefix] << lib_file
+                  full_lib_files[prefix] << Path(lib_file)
                 end
               end
 
@@ -431,9 +442,9 @@ module Carton
       end
 
       file fn_obj => fn_sql do |t|
-        target = File.expand_path(t.name)
-        Dir.chdir(File.dirname(fn_sql)) do
-          Objcopy.new.import(File.basename(fn_sql), target)
+        target = Path(t.name).expand
+        fn_sql.dir.chdir do
+          Objcopy.new.import(fn_sql.basename, target)
         end
         t.check!
       end

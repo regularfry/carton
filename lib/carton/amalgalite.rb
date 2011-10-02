@@ -3,7 +3,7 @@ module Carton
   # Wrapper around the amalgalite-pack binary
   class Amalgalite
     def initialize(fn_db)
-      @fn_db = fn_db
+      @fn_db = Path(fn_db)
     end
   
     def bin

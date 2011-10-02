@@ -38,6 +38,12 @@ def parse_opts(args)
     opts.separator ""
     opts.separator "Specific options:"
 
+    opts.on("-r", 
+            "--rubydir RUBYDIR",
+            "A ruby source directory") do |opt|
+      options[:rubydir] = opt
+    end
+
     opts.on("-o", "--output EXECUTABLE",
             "Required: The single-file executable to build") do |opt|
       options[:output] = opt
@@ -96,7 +102,8 @@ end
 options = parse_opts(ARGV)
 
 
-Carton::App.new.run(options[:build_path], 
+Carton::App.new.run(options[:rubydir],
+                    options[:build_path], 
                     options[:output], 
                     options[:appfile],
                     options[:globs],

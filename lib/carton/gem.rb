@@ -1,3 +1,5 @@
+require 'path'
+
 module Carton
 
   # Class for handling (and installing) gems.
@@ -22,7 +24,7 @@ module Carton
     end
 
     def root
-      File.join(gem_spec().full_gem_path)
+      Path(File.join(gem_spec().full_gem_path))
     end
 
     def install

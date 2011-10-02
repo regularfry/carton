@@ -51,6 +51,15 @@ module TestCarton
     end
 
 
+    def test_extinit_c
+      Tempfile.new("text_ext_setup") do |f|
+        Path(f.path).write "thing"
+
+        ext_setup = ExtSetup.new( f.path )
+        assert_match /Init_thing/, ext_setup.extinit_c
+      end
+    end 
+
   end # class TestExtSetup
 
 

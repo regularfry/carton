@@ -1,4 +1,5 @@
 require 'rake'
+require 'path'
 require 'carton/ext_setup'
 
 module Carton
@@ -9,9 +10,11 @@ module Carton
   class Exts
     attr_reader :path
 
+    # `path` should be the path to the ext/ directory of
+    # a ruby source tree.
     def initialize(path)
-      @path = path
-      @setup = ExtSetup.new(File.join(path, "Setup"))
+      @path = Path(path)
+      @setup = ExtSetup.new(@path / "Setup")
     end
 
 
@@ -23,14 +26,27 @@ module Carton
 
     def enabled
       return @setup.enabled().select do |line|
-        prefix = File.join( File.dirname(@path), line.strip, "lib" )
-        File.directory?( prefix )
+        prefix = @path / line.strip / "lib"
+        prefix.directory?
       end
     end
 
 
+    # Returns those extensions which are both
+    # enabled in Setup and have a static build.
     def libs
-      FileList[File.join(@path, "**", "*.a")]
+      all_enabled = @setup.enabled
+      if all_enabled.empty?
+        return []
+      else
+        en = all_enabled.join(",")
+        return FileList[@path / "{#{en}}" / "**" / "*.a"]
+      end
+    end
+
+
+    def write_extinit_c
+      (@path/"extinit.c").write(@setup.extinit_c)
     end
 
 

@@ -11,19 +11,17 @@ module TestCarton
     C = Carton
 
     def test_libs_lists_static_only
-      @dirname = File.join(Dir.tmpdir, "test_libs_lists_statics_only#{$$}")
+      @dir = Path(Dir.tmpdir) /  "test_libs_lists_statics_only#{$$}"
       
-      FileUtils.mkdir_p(@dirname)
-      %w{libfoo.o libbar.a}.each do |filename|
-        `touch #{File.join(@dirname, filename)}`
-      end
+      (@dir/"Setup").write("foo\nbar")
+      (@dir/"foo"/"libfoo.o").touch
+      (@dir/"bar"/"libbar.a").touch
       
-      exts = C::Exts.new(@dirname)
+      exts = C::Exts.new(@dir.to_s)
       
-      assert_equal( %W{#{File.join(@dirname, "libbar.a")}}, 
-                    exts.libs)
+      assert_equal( %W{#{@dir/"bar"/"libbar.a"}}, exts.libs)
     ensure
-      FileUtils.rm_rf @dirname
+      @dir.rm_rf
     end
 
 

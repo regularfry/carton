@@ -11,7 +11,8 @@ module Carton
       @app.init("carton")
     end
 
-    def run(build_path, 
+    def run(rubydir,
+            build_path, 
             outputfile, 
             appfile, 
             include_files, 
@@ -20,7 +21,12 @@ module Carton
             verbose=false)
       # HACKHACKHACK
       if build_path && outputfile && appfile
-        Task.new(build_path, outputfile, appfile, include_files, load_path)
+        Task.new(rubydir, 
+                 build_path, 
+                 outputfile, 
+                 appfile,
+                 include_files,
+                 load_path)
         @app.options.trace = verbose
         @app.invoke_task(carton_task || outputfile)
       else

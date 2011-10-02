@@ -81,7 +81,7 @@ VALUE import_from_s(VALUE sql_str)
  * Require the named file, sidestepping Kernel.require when we know it
  * can't work yet.
  */
-VALUE am_require( VALUE filename )
+VALUE carton_am_require( VALUE filename )
 {
   StringValue( filename );
   VALUE Amalgalite   = rb_const_get(rb_cObject, rb_intern("Amalgalite"));

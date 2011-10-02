@@ -1,10 +1,14 @@
+# encoding: utf-8
+
+require 'path'
+
 module Carton
   
   # Handler for ruby/ext/Setup, for enabling extensions and 
   # static options prior to a build
   class ExtSetup
     def initialize(filename)
-      @filename=filename
+      @filename=Path(filename)
     end
 
     def enable(*exts)
@@ -17,15 +21,13 @@ module Carton
 
     def enabled
       result = []
-      raise "#{@filename} doesn't exist!" unless File.file?(@filename)
-      File.open(@filename) do |f|
-        f.each_line do |line|
-          next if line =~ /\Aoption/
-          next if line.strip.length == 0
-          next if line =~ /\A#/
+      raise "#{@filename} doesn't exist!" unless @filename.exists?
+      @filename.read.lines.each do |line|
+        next if line =~ /\Aoption/
+        next if line.strip.length == 0
+        next if line =~ /\A#/
 
-          result << line.strip
-        end
+        result << line.strip
       end
       result
     end
@@ -34,6 +36,21 @@ module Carton
       enable("option nodynamic")
     end
 
+
+    def extinit_c
+      c = <<-C
+#include "ruby.h"
+#define init(func, name) {void func _((void)); ruby_init_ext(name, func);}
+      
+void ruby_init_ext _((const char *name, void (*init)(void)));
+void Init_ext _((void))
+{
+      C
+      enabled.each do |name|
+        c << "init(Init_#{name.split("/").last}, \"#{name}.so\");\n"
+      end
+      c << "}\n"
+    end
 
   end # class ExtSetup
 

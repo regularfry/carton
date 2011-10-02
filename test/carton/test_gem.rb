@@ -28,8 +28,8 @@ module TestCarton
     
     def test_root_returns_a_gem_home
       gem = C::Gem.new("mocha")
-      assert_match %r{mocha}, gem.root
-      assert File.directory? gem.root
+      assert_match %r{mocha}, gem.root.basename
+      assert gem.root.directory?
     end
 
 
