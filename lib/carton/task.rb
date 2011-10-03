@@ -353,6 +353,52 @@ module Carton
       end
 
 
+      # Build the gem extensions. This depends on having at
+      # least a miniruby.
+      file fn_build_file("libgems.a") => @fn_gemdir do |t|
+        begin
+          ::Gem.use_paths(@fn_gemdir)
+          si = ::Gem.source_index
+
+          ruby = (@ruby_fakeroot/"bin"/"ruby").expand
+          si.all_gems.values.each do |gemspec|
+            exts = gemspec.extensions
+            exts.each do |ext_path|
+              prefix = (Path(gemspec.full_gem_path)/ext_path).dir
+              
+              prefix.chdir do
+                raise "Constructing the makefile for #{ext_path} failed" unless
+                  system %Q{#{ruby} -e 'require "mkmf";$static=true;require "extconf.rb"'}
+                raise "Building #{ext_path} failed!" unless
+                  system "make static"
+              end
+            end
+          end
+
+          # I can't tell which .a maps to which .o, and in general
+          # it's not worth the effort to figure it out, so just unpack
+          # everything and repack
+          gem_exts = @fn_gemdir["**/*.a"]
+          libgems_dir = fn_build_file("libgems")
+          libgems_dir.mkdir_p
+          gem_exts.each do |g| 
+            g.mv libgems_dir
+          end
+          libgems_dir.chdir do 
+            Dir['*.a'].each do |archive|
+              sh "ar x #{archive}"
+            end
+          end
+
+          sh "ar rcs #{t.name} #{libgems_dir["*.o"].join(" ")}"
+
+        ensure
+          ::Gem.clear_paths
+        end
+        t.check!
+      end
+
+
       fns_code_obj = [sqldump_obj( fn_build_file("lib.db") ),
                       @gems_needed ? 
                         sqldump_obj( fn_build_file("gem.db") ) : 
@@ -388,8 +434,7 @@ module Carton
                 ruby-static
                 rubycode
                 amalgalite3
-                ffi
-      }
+      } + (@gems_needed ? %w{gems} : [])
       objs = %w{
                 carton_boot
       }.map{|o| o+".o"}
