@@ -326,7 +326,9 @@ module Carton
               prefix = Path(gemspec.full_gem_path)/load_path
               prefix.chdir do
                 Dir['**/*'].each do |lib_file|
-                  full_lib_files[prefix] << Path(lib_file)
+                  lib_file_path = Path(lib_file).expand
+                  full_lib_files[prefix] << lib_file_path if
+                    lib_file_path.file?
                 end
               end
 
