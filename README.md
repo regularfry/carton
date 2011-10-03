@@ -1,19 +1,25 @@
 # carton #
 
 Carton is a static ruby application builder, which will compile
-pure-ruby applications, which may depend on pure-ruby gems, into a
-single static binary which can be distributed without any accompanying
-infrastructure.
+pure-ruby applications, which may depend on pure-ruby gems or native
+extensions, into a single static binary which can be distributed without
+any accompanying infrastructure.
 
 It uses rvm to fetch and build ruby, interfaces with bundler to handle
 gem dependencies, and will play nicely with your existing pure-ruby
 projects.
+
+A word of warning: THIS IS UNFINISHED SOFTWARE. IT WILL PROBABLY BREAK.
+
+But when it does, tell [me](mailto:alex@bytemark.co.uk) about it so I can
+fix it and make it betterer.
 
 ## Installation ##
 
 First install [rvm](http://rvm.beginrescueend.com). Then:
 
     rvm install ruby-1.8.7-p302
+    rvm use ruby-1.8.7-p302
     gem install bundler carton
 
 ## How to  ##
@@ -171,11 +177,24 @@ that binary to anyone else, you are bound by amalgalite's
 ## What doesn't work ##
 
 - Anything involving the `\_\_FILE\_\_` constant.  This is unlikely
-  ever to work, and you probably shouldn't be using it in a library
-  anyway.
+  ever to work.
 - `require 'rubygems'`.  Just no.  'Nuff said.
 - Any ruby version other than 1.8.7-p302. To be honest, other ruby
-  versions *may* work, I just haven't tried them yet.
+  versions *may* work, I just haven't tried them yet.  One thing I am
+  certain of is that 1.9.x does *not* work, because the build
+  process has changed somewhat.  Anyone who feels like assisting in
+  getting this to work will be made more than welcome.
+
+## What's next ##
+
+- Gem coverage.  I want to get this working with as many gems as
+  possible.  I want "build a carton and scp it to your server" to
+  be a realistic deployment option for everyone.
+- Windows support.  Either via devkit or cross-compiling.
+- 1.9.3 support.  I believe this *can* work, but I don't understand
+  all the changes that have been made to the build process yet.
+- Rubinius support.  There has in the past been support for building
+  rubinius as a static library, and I'd like to take advantage of that.
 
 ## Credits ##
 
