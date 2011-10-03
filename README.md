@@ -131,7 +131,7 @@ package any named gems into the application.
     gem "json_pure"
     
     $ cat bin/myapp6
-    require 'json/pure'
+    require 'json'
     puts [:hello,:world].to_json
     
     $ carton -i bin/myapp6 -o dist/myapp6
@@ -142,12 +142,13 @@ package any named gems into the application.
     ["hello","world"]
     
 
+Gem extensions are compiled into the final binary.
 
 
 ## How it works ##
 
 The premise of carton is simple: to take ruby files and, instead of
-reading them from the filesystem when they are required, instead read
+reading them from the filesystem when they are required, read
 them from an in-memory database.
 
 Amalgalite provides the SQLite3 wrapper necessary to build ruby files
@@ -169,13 +170,6 @@ that binary to anyone else, you are bound by amalgalite's
 
 ## What doesn't work ##
 
-- Non-stdlib extensions. These don't work *yet*, but if I can figure
-  out how to build them automagically as static archives rather than
-  dynamic libraries, they will.
-- Digest, openssl, syck and tk from stdlib.  These call rb_require
-  directly, which sidesteps amalgalite.  I believe that these can be
-  made to work eventually, but I haven't nailed down the best
-  mechanism yet.
 - Anything involving the `\_\_FILE\_\_` constant.  This is unlikely
   ever to work, and you probably shouldn't be using it in a library
   anyway.
