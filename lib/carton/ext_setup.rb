@@ -47,7 +47,7 @@ void Init_ext _((void))
 {
       C
       enabled.each do |name|
-        c << "init(Init_#{name.split("/").last}, \"#{name}.so\");\n"
+        c << "        init(Init_#{name.split("/").last}, \"#{name}.so\");\n"
       end
       c << "}\n"
     end

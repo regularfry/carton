@@ -1,4 +1,3 @@
-require 'rake'
 require "rake/tasklib"
 require 'rubygems'
 require 'path'
@@ -58,10 +57,10 @@ module Carton
 
       @rubydir = Path(rubydir)
       @build_dir = Path(build_path)
-      @ruby = Ruby.new(fn_build_file("ruby"))
+      @ruby = Ruby18.new(fn_build_file("ruby"))
       @ruby_fakeroot = fn_build_file("ruby_fakeroot")
       @gems_needed = File.file?("Gemfile")
-      define(outputfile, appfile, include_files, load_path)
+      define(rubydir, outputfile, appfile, include_files, load_path)
 
     end
 
@@ -98,11 +97,7 @@ module Carton
     end
 
     def pack_exts(am_db)
-      puts "*"*40
-      p exts.enabled
-      puts "*"*40
       exts.enabled.each do |fn_lib|
-        p :fn_lib => fn_lib
         am_db.merge(fn_lib, fn_lib)
       end
     end
@@ -159,30 +154,29 @@ module Carton
     end
 
 
-    def define(outputfile, appfile, include_files, load_path)
+    def define(rubydir, outputfile, appfile, include_files, load_path)
 
       # These are the default extensions which crate builds, I'll sort
       # out a different mechanism for specifying these later
       allowed_exts = %w{
+          stringio
+          openssl 
           bigdecimal
           digest
           digest/md5
           digest/sha1
-          enumerator
           etc
           fcntl
           iconv
           io/wait
-          openssl 
           nkf
           socket
-          stringio
           strscan
           syck
           thread
           zlib
         }
-      allowed_exts = %w{}
+      #allowed_exts = %w{}
 #          
 
       desc(
@@ -190,14 +184,15 @@ module Carton
       # This is needed otherwise we risk clobbering the *current* ruby,
       # which would be Bad.
       file @ruby.root do |t|
-        root = Path(t.name)
-        sh "cp -a #{RVM.src} #{root}"
+        sh "cp -a #{@rubydir} #{@ruby.root}"
         # Clear this out because chances are that our build
         # choices won't match RVM's, and it might not get 
         # rebuilt unless it's absent
-        root.chdir{ system "make clean" }
+        @ruby.root.chdir{ system "make clean" }
         raise "Didn't clear libruby-static.a" if
-          (root/"libruby-static.a").file?
+          (@ruby.root/"libruby-static.a").file?
+
+        @ruby.prepare
 
         t.check!
       end
@@ -378,7 +373,7 @@ module Carton
                   #{@ruby.rbconfig['CFLAGS']}
                   #{@ruby.rbconfig['XCFLAGS']}
                   #{@ruby.rbconfig['CPPFLAGS']}
-                  -I #{@ruby.root}
+                  #{@ruby.includes.map{|i| "-I #{i}"}.join(" ")}
                   -o #{t.name}
         }
         sh "#{@ruby.rbconfig['CC']} #{opts.join(" ")}"
@@ -391,6 +386,7 @@ module Carton
                 ruby-static
                 rubycode
                 amalgalite3
+                ffi
       }
       objs = %w{
                 carton_boot

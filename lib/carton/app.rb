@@ -21,7 +21,7 @@ module Carton
             verbose=false)
       # HACKHACKHACK
       if build_path && outputfile && appfile
-        Task.new(rubydir, 
+        Task.new(rubydir || RVM.src, 
                  build_path, 
                  outputfile, 
                  appfile,
