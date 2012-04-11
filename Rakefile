@@ -9,6 +9,7 @@ end
 
 Rake::TestTask.new do |t|
   t.libs << "lib"
+  t.libs << "."
   t.test_files = FileList["test/**/test_*.rb"]
   t.verbose = true
 end

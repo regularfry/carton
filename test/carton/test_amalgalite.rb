@@ -1,4 +1,5 @@
 require 'test/helper'
+require 'rubygems'
 
 require 'carton/amalgalite'
 
@@ -8,7 +9,7 @@ module TestCarton
     C = Carton
 
     def setup
-      @amalgalite_gem = Gem.source_index.find_name("amalgalite").first
+      @amalgalite_gem = Gem::Specification.find_all_by_name("amalgalite").first
       fail "No amalgalite gem!" unless @amalgalite_gem
       @am = C::Amalgalite.new(nil)
     end

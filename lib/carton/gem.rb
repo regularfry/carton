@@ -15,7 +15,7 @@ module Carton
       require 'rubygems'
       
       raise "Gem #{name} not found!" unless
-        @gem_spec ||= ::Gem.source_index.find_name(name).last
+        @gem_spec ||= ::Gem::Specification.find_all_by_name(name).first
       @gem_spec
     end
     
